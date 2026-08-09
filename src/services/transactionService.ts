@@ -12,6 +12,13 @@ export function buildCategoryPatch(
   tx: Transaction,
   target: Category,
 ): Partial<Transaction> & { clear_parent?: boolean } {
+  // 1.1.0：转成 habit 时——清 priority（habits 无优先级，与新建 habit 默认 1 一致，修复
+  // 「拖入保留旧 priority / 新建=1」的数据不一致）、清 show_in_next + time_slot（否则被
+  // 1.0.2 自动晋升的 waiting 拖进来后仍残留在 Next）、清 wait_auto_next（1.0.2 晋升标记，
+  // 对 habit 无意义、留着是死数据）、清 deadline（时间要求对 habit 用不上）、清 parent_id（habit 不分层）。
+  if (target === "habit") {
+    return { category: "habit", priority: 1, show_in_next: false, time_slot: "none", wait_auto_next: false, deadline_type: "none", deadline_date: null, clear_parent: true };
+  }
   if (tx.category === "next_action") {
     return { category: target, clear_parent: true, time_slot: "none", show_in_next: false };
   }

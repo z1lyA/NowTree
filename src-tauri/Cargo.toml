@@ -1,6 +1,6 @@
 [package]
 name = "nowtree"
-version = "1.0.4"
+version = "1.1.0"
 description = "NowTree - 个人事务管理系统"
 edition = "2021"
 

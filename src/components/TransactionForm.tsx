@@ -36,6 +36,8 @@ interface TransactionFormProps {
   inbox?: boolean;
   // 是否显示「类型」分段选择（编辑弹窗在非 inbox 且非 hideCategory 时为 true）。
   showCategory?: boolean;
+  // 1.1.0：习惯（habit）模式——隐藏优先级 / 时间要求 / 提醒（习惯每天重置，不需要这些字段）。
+  habit?: boolean;
   submitLabel: string;
   onCancel: () => void;
   onSubmit: (v: TxFormValues) => void | Promise<void>;
@@ -51,6 +53,13 @@ const DEADLINES: DeadlineType[] = ["none", "today", "week", "month", "date"];
 
 function formatReminder(iso: string) {
   return iso.replace("T", " ");
+}
+
+// 当前本地时间，供 datetime-local 的 min 属性用（YYYY-MM-DDTHH:MM），从 UI 层面阻止选过去时间。
+function nowLocalDatetime(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // 程序化打开原生日期/时间选择器（必须在用户手势内调用）
@@ -73,6 +82,7 @@ export default function TransactionForm({
   initial,
   inbox,
   showCategory,
+  habit,
   submitLabel,
   onCancel,
   onSubmit,
@@ -88,6 +98,7 @@ export default function TransactionForm({
   const [deadlineDate, setDeadlineDate] = useState(initial.deadlineDate);
   const [reminderTime, setReminderTime] = useState(initial.reminderTime);
   const [deadlineInteracted, setDeadlineInteracted] = useState(false);
+  const [reminderInteracted, setReminderInteracted] = useState(false);
   const savingRef = useRef(false);
   const dateRef = useRef<HTMLInputElement>(null);
   const reminderRef = useRef<HTMLInputElement>(null);
@@ -109,6 +120,7 @@ export default function TransactionForm({
     setDeadlineDate(initial.deadlineDate);
     setReminderTime(initial.reminderTime);
     setDeadlineInteracted(false);
+    setReminderInteracted(false);
     savingRef.current = false;
   }, [resetKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -127,6 +139,14 @@ export default function TransactionForm({
       const dl = resolveDeadline(norm.type, norm.date);
       if (dl.date && dl.date < todayStr()) {
         showToast("你设置的时间已过期，请重新设置");
+        return;
+      }
+    }
+    // 1.1.0：提醒时间同样禁止设成过去（照搬时间要求的「过期拦截」；仅当用户动过提醒栏才校验，
+    //     避免打开一个已有过去提醒的项只改备注就被误拦）。
+    if (!inbox && reminderInteracted && reminderTime) {
+      if (new Date(reminderTime).getTime() <= Date.now()) {
+        showToast("你设置的提醒时间已过期，请重新设置");
         return;
       }
     }
@@ -179,6 +199,7 @@ export default function TransactionForm({
 
   function onReminderChange(e: React.ChangeEvent<HTMLInputElement>) {
     setReminderTime(e.target.value);
+    setReminderInteracted(true);
   }
 
   return (
@@ -230,7 +251,7 @@ export default function TransactionForm({
       {/* parentSelect 插槽：如 ConvertModal 的「父事务」选择器，仅 project 类型时渲染 */}
       {!inbox && showCategory && category === "project" && parentSelect}
 
-      {!inbox && (
+      {!inbox && !habit && (
         <>
           <div className="field">
             <span>优先级</span>
@@ -283,40 +304,45 @@ export default function TransactionForm({
               )}
             </div>
           </div>
+        </>
+      )}
 
-          <div className="field inline-row">
-            <span>提醒</span>
-            <div className="reminder-picker">
+      {/* 1.1.0：提醒对 habit 也开放（一次性提醒，与全局一致）；inbox 仍隐藏。
+          注：habit 的「一次性提醒」弹过即焚、6 点重置不恢复，故对 habit 只响一次。 */}
+      {!inbox && (
+        <div className="field inline-row">
+          <span>提醒</span>
+          <div className="reminder-picker">
+            <button
+              type="button"
+              className="reminder-icon-btn"
+              title="选择提醒时间"
+              onClick={() => openPicker(reminderRef)}
+            >
+              📅
+            </button>
+            <input
+              ref={reminderRef}
+              type="datetime-local"
+              className="reminder-input-hidden"
+              value={reminderTime}
+              min={nowLocalDatetime()}
+              onChange={onReminderChange}
+            />
+            {reminderTime && (
+              <span className="reminder-value">{formatReminder(reminderTime)}</span>
+            )}
+            {reminderTime && (
               <button
                 type="button"
-                className="reminder-icon-btn"
-                title="选择提醒时间"
-                onClick={() => openPicker(reminderRef)}
+                className="btn-ghost"
+                onClick={() => setReminderTime("")}
               >
-                📅
+                清除
               </button>
-              <input
-                ref={reminderRef}
-                type="datetime-local"
-                className="reminder-input-hidden"
-                value={reminderTime}
-                onChange={onReminderChange}
-              />
-              {reminderTime && (
-                <span className="reminder-value">{formatReminder(reminderTime)}</span>
-              )}
-              {reminderTime && (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => setReminderTime("")}
-                >
-                  清除
-                </button>
-              )}
-            </div>
+            )}
           </div>
-        </>
+        </div>
       )}
 
       <div className="modal-actions">

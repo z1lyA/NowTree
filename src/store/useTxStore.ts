@@ -68,6 +68,8 @@ interface TxStore {
   normalizeDeadlines: () => Promise<void>;
   // 1.0.2：Waiting for 设时间要求且已到/逾期的项，自动翻 show_in_next=1 进 Next
   autoPromoteWaiting: () => Promise<void>;
+  // 1.1.0：Habits 视图——每日 6 点把「完成时间早于今日 6:00」的 habit 重置回 active
+  resetHabits: () => Promise<void>;
   // 提醒：扫描到期且未弹过的 active 事务，弹系统通知并标记已弹。
   checkReminders: () => Promise<void>;
 }
@@ -98,6 +100,9 @@ export const useTxStore = create<TxStore>((set, get) => ({
       // 1.0.2：数据写入后再做一次 deadline 归一（具体日期=今天 → 今日）。
       // 修复此前「挂载瞬间扫描时本地数据尚未加载、扫空」导致该功能几乎不触发的问题。
       await get().normalizeDeadlines();
+      // 1.1.0：Habits 每日重置（完成时间早于今日 6:00 的 habit 复位），启动即补一次——
+      // 若 app 没在 6:00 开着，打开时仍能把昨天完成的 habit 拉回未完成。
+      await get().resetHabits();
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -303,6 +308,52 @@ export const useTxStore = create<TxStore>((set, get) => ({
     // 1.0.2：deadline 归一后紧接执行 Waiting 自动晋升（同一次启动/跨天扫描）；
     // 必须 RUN AFTER 归一，确保 deadline_date 已是最新锚点。
     await get().autoPromoteWaiting();
+  },
+
+  // 1.1.0：Habits 每日重置——把「已完成且完成时间早于今日 6:00」的 habit 复位为 active。
+  // 逻辑：本地时间跨过 06:00 时，把此刻所有已完成 habit 清零（任何"昨日或今晨 0-6 点"完成的
+  // 都早于今日 6:00，符合"昨天完成过 / 0-6 点完成 6 点重置"的界定）；完成时间 >= 今日 6:00 的
+  // （即今天 6 点之后才完成的）不重置，留到次日。幂等：已 active 的不命中，重复触发无害。
+  resetHabits: async () => {
+    const now = new Date();
+    // 阈值 = 最近的 06:00 边界：now < 今天 6 点（如凌晨 2 点打开）时回退到昨天 06:00，
+    // 这样「昨晚完成的 habit」在 0-6 点仍显示已完成、到 6 点才重置，避免提前 4 小时清空（C1）。
+    const todaySix = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0, 0);
+    const threshold =
+      now.getTime() < todaySix.getTime()
+        ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 6, 0, 0, 0)
+        : todaySix;
+    const jobs: Promise<void>[] = [];
+    for (const t of get().active) {
+      if (t.category !== "habit") continue;
+      const patch: Partial<Transaction> & { clear_reminder?: boolean } = {};
+      // C2：completed_time 为空的已完成 habit（导入/历史数据）也重置——null 视为最旧、必命中。
+      if (t.status === "completed") {
+        const ct = t.completed_time ? new Date(t.completed_time).getTime() : 0;
+        if (ct < threshold.getTime()) {
+          patch.status = "active";
+          patch.completed_time = null;
+        }
+      }
+      // 1.1.0：habit 提醒是「一次性」。跨天（昨天及更早）的提醒在每日重置时清掉，
+      // 避免次日打开 app 补弹「昨天的习惯」——第二天是新的习惯周期，不会去补昨天的。
+      // 当天稍后的未来/迟到提醒保留（仍是今天的习惯，可正常响一次）。
+      if (t.reminder_time) {
+        const rd = new Date(t.reminder_time);
+        const isPrevDay =
+          rd.getFullYear() !== now.getFullYear() ||
+          rd.getMonth() !== now.getMonth() ||
+          rd.getDate() !== now.getDate();
+        if (isPrevDay) {
+          patch.reminder_time = null;
+          patch.clear_reminder = true;
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        jobs.push(get().updateTx(t.id, patch));
+      }
+    }
+    await Promise.all(jobs);
   },
 
   // 1.0.2：Waiting for 设了时间要求且已到/逾期的项，自动翻 show_in_next=1 进 Next，

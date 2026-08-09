@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTxStore } from "../store/useTxStore";
 import type { Transaction } from "../types/transaction";
 import { byOrder, byPriority, byTime, byCompletion, CAT_MAP } from "../types/transaction";
+import { buildCategoryPatch } from "../services/transactionService";
 import EditModal from "./EditModal";
 import AddChildModal from "./AddChildModal";
 import AddModal from "./AddModal";
@@ -209,10 +210,18 @@ export default function ProjectListView() {
   // 0.1.19：子事务跨类别拖拽落点——拖到左侧导航栏改类别。
   // 规则：inbox 禁止互转（拖到 Inbox 导航不高亮、无操作）；
   //       其余类别正常改；**保持 show_in_next 与 time_slot（不影响 Next 展示状态），并脱离原父项目**。
+  // 0.1.19/1.1.0：project 子事务或顶层项目拖到 Habits——复用 buildCategoryPatch 的统一清理，
+  // 否则会残留 priority / show_in_next / time_slot / wait_auto_next / deadline 这些 habit 用不上的字段。
+  function toHabit(id: number) {
+    const tx = useTxStore.getState().active.find((t) => t.id === id);
+    if (tx) updateTx(id, buildCategoryPatch(tx, "habit"));
+  }
   function childCatTarget(id: number, cat: string) {
     if (cat === "inbox") return;
     const c = CAT_MAP[cat];
-    if (c) updateTx(id, { category: c, clear_parent: true });
+    if (!c) return;
+    if (c === "habit") toHabit(id);
+    else updateTx(id, { category: c, clear_parent: true });
   }
   // 0.1.18：无子父事务跨类别拖拽落点——拖到左侧导航栏改类别。
   // 规则：inbox 禁止互转；拖到 Project 导航 = 无操作（已在 Project）；
@@ -221,8 +230,10 @@ export default function ProjectListView() {
     if (cat === "inbox" || cat === "project") return;
     if (childrenOf(id).length > 0) return; // 含子父事务不可改类别
     const c = CAT_MAP[cat];
-    // 离开 Project 上下文：清 parent_id、重置 time_slot（父项目本不可展示在 Next，不写 show_in_next）
-    if (c) updateTx(id, { category: c, clear_parent: true, time_slot: "none" });
+    if (!c) return;
+    // 离开 Project 上下文：转 habit 走统一清理；其它目标清 parent_id + 重置 time_slot（保持 show_in_next）
+    if (c === "habit") toHabit(id);
+    else updateTx(id, { category: c, clear_parent: true, time_slot: "none" });
   }
   // 0.1.17：子事务拖到某个父事务行（data-parent-id）= 改父（成为该父的子事务）。
   // 含子的父事项按 0.1.14/0.1.17 规则只能排序，不可改父（此处不会被传 allowReparent）。

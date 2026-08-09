@@ -4,6 +4,7 @@ import InboxView from "./components/InboxView";
 import CategoryListView from "./components/CategoryListView";
 import ProjectListView from "./components/ProjectListView";
 import NextView from "./components/NextView";
+import HabitsView from "./components/HabitsView";
 import StartupModal from "./components/StartupModal";
 import { currentClockSlot } from "./utils/clock";
 import TrashModal from "./components/TrashModal";
@@ -22,12 +23,13 @@ import { useShell } from "./hooks/useShell";
 import {
   useReminderScan,
   useDeadlineNormalize,
+  useHabitReset,
   useToastSubscription,
 } from "./hooks/useLifecycle";
 
 // 侧边栏导航 key。
 // inbox → InboxView；project → 专用 ProjectListView（树状）；next/waiting/someday → 通用 CategoryListView。
-type ViewKey = "inbox" | "next" | "project" | "waiting" | "someday";
+type ViewKey = "inbox" | "next" | "project" | "waiting" | "someday" | "habit";
 
 // 侧边栏导航项：inbox 固定；四类从 CATEGORY_META 派生 navLabel（C4：单一来源，新增类别只改一处）。
 const NAV: { key: ViewKey; label: string }[] = [
@@ -55,12 +57,13 @@ export default function App() {
   const [startupOpen, setStartupOpen] = useState(true);
   // 1.0.4：跨边界重弹——记录最近一次已提示的时段，定时对比当前钟点，越过边界则重新弹出
   const lastNotifiedSlotRef = useRef(currentClockSlot());
+  const closeConfirmRef = useRef(false);
   useEffect(() => {
     if (startupOpen) lastNotifiedSlotRef.current = currentClockSlot();
   }, [startupOpen]);
   useEffect(() => {
     const id = setInterval(() => {
-      if (!startupOpen && currentClockSlot() !== lastNotifiedSlotRef.current) {
+      if (!startupOpen && !closeConfirmRef.current && currentClockSlot() !== lastNotifiedSlotRef.current) {
         setStartupOpen(true);
       }
     }, 30000);
@@ -76,12 +79,14 @@ export default function App() {
   const loadTrash = useTxStore((s) => s.loadTrash);
   const checkReminders = useTxStore((s) => s.checkReminders);
   const normalizeDeadlines = useTxStore((s) => s.normalizeDeadlines);
+  const resetHabits = useTxStore((s) => s.resetHabits);
 
   // 0.1.19：toast / 主题 / 提醒扫描 / deadline 归一 抽离为独立 hook，降低 App 体积。
   const { toast, toastAction, showToast } = useToast();
   const { theme, chooseTheme } = useTheme();
   useReminderScan(checkReminders);
   useDeadlineNormalize(normalizeDeadlines);
+  useHabitReset(resetHabits);
   useToastSubscription(showToast);
 
   // 挂载：预拉取 active；请求通知权限。
@@ -149,7 +154,28 @@ export default function App() {
 
   // C9：外壳操作（导入导出 / 清空 / 自启动 / 提示音 / 窗口关闭）收口到 useShell，
   // 避免 App 直接散落 invoke / localStorage / 窗口事件监听。
-  const shell = useShell({ showToast, loadActive, loadInbox, loadTrash, isDev, setDataOpen });
+  const shell = useShell({
+    showToast,
+    loadActive,
+    loadInbox,
+    loadTrash,
+    isDev,
+    setDataOpen,
+    // 1.1.0：关闭确认弹出前先收起其他覆盖层，确保关闭确认始终置顶
+    dismissOverlays: () => {
+      setStartupOpen(false);
+      setSettingsOpen(false);
+      setDataOpen(false);
+      setTrashOpen(false);
+      setShortcutsOpen(false);
+      setThemeOpen(false);
+    },
+  });
+
+  // 1.1.0：镜像关闭确认状态到 ref，供跨边界重弹定时器判断（避免关闭确认展示期间被每日弹窗顶回）
+  useEffect(() => {
+    closeConfirmRef.current = shell.closeConfirm;
+  }, [shell.closeConfirm]);
 
   // 快捷键：1-5 切换视图；Enter 打开当前视图的加号（nowtree:quick-add 由各视图监听）
   useEffect(() => {
@@ -181,6 +207,7 @@ export default function App() {
         "3": "project",
         "4": "waiting",
         "5": "someday",
+        "6": "habit",
       };
       const v = map[e.key];
       if (v) {
@@ -286,7 +313,7 @@ export default function App() {
               </button>
               <div className="side-menu-sep" />
               <div className="side-menu-motto">种一棵树最好的时间是十年前，其次是现在</div>
-              <div className="side-menu-version">v1.0.4 · 本地 SQLite</div>
+              <div className="side-menu-version">v1.1.0 · 本地 SQLite</div>
             </div>
           )}
         </div>
@@ -299,6 +326,7 @@ export default function App() {
         {view === "project" && <ProjectListView />}
         {view === "waiting" && <CategoryListView category="waiting" />}
         {view === "someday" && <CategoryListView category="someday" />}
+        {view === "habit" && <HabitsView />}
       </main>
 
       {trashOpen && <TrashModal onClose={() => setTrashOpen(false)} />}

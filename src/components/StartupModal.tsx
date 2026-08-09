@@ -5,10 +5,18 @@ import Modal from "./common/Modal";
 import { useTxStore } from "../store/useTxStore";
 import type { Transaction } from "../types/transaction";
 import { TIME_SLOT_LABELS, byOrder } from "../types/transaction";
-import { currentClockSlot } from "../utils/clock";
+import { currentClockSlot, type ClockSlot } from "../utils/clock";
 import { dailyQuote } from "../data/quotes";
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
+
+// 四个时段对应弹窗标题问候语（替代固定的「今天」）
+const SLOT_GREETING: Record<ClockSlot, string> = {
+  morning: "早上好",
+  noon: "下午好",
+  evening: "晚上好",
+  rest: "晚安",
+};
 
 export default function StartupModal({ onClose }: { onClose: () => void }) {
   const { active } = useTxStore();
@@ -40,7 +48,7 @@ export default function StartupModal({ onClose }: { onClose: () => void }) {
   }, [active, slot]);
 
   return (
-    <Modal title="今天" onClose={onClose}>
+    <Modal title={SLOT_GREETING[slot]} onClose={onClose}>
       <p className="startup-quote">「{quote}」</p>
       <p className="startup-date">今天是 {dateStr} 星期{week}</p>
 

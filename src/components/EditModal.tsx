@@ -17,9 +17,11 @@ interface EditModalProps {
   onDelete?: () => void;
   // 0.1.16：隐藏「类型」分段选择（Project 子事务 / Next 展示项：子事务·waiting·someday 凭 show_in_next 透出）
   hideCategory?: boolean;
+  // 1.1.0：习惯（habit）编辑——隐藏类型选择、优先级 / 时间要求 / 提醒（习惯每天重置，不需要这些）
+  habit?: boolean;
 }
 
-export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }: EditModalProps) {
+export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory, habit }: EditModalProps) {
   const { updateTx, deleteTx } = useTxStore();
   const [confirmDel, setConfirmDel] = useState(false);
 
@@ -94,7 +96,7 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }
     onClose();
   }
 
-  const showCategory = !inbox && !hideCategory;
+  const showCategory = !inbox && !hideCategory && !habit;
 
   return (
     <Modal title={inbox ? "编辑灵感" : "编辑事务"} onClose={onClose}>
@@ -110,6 +112,7 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }
         }}
         inbox={inbox}
         showCategory={showCategory}
+        habit={habit}
         submitLabel="保存"
         onCancel={onClose}
         onSubmit={handleSave}

@@ -17,10 +17,10 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 └────────────┬───────────────────────────────┘
             │ Tauri IPC
 ┌────────────▼─────────────────────────┐
-│  Rust 后端（src-tauri）              │
-│  commands.rs  ← 所有 Tauri 命令实现  │
-│  db.rs        ← SQLite 连接 / 建表   │
-│  lib.rs       ← 入口、托盘、插件注册 │
+│  Rust 后端（src-tauri）               │
+│  commands.rs  ← 所有 Tauri 命令实现   │
+│  db.rs        ← SQLite 连接 / 建表    │
+│  lib.rs       ← 入口、托盘、插件注册   │
 │           ▼                          │
 │  SQLite（本机 AppData/nowtree.sqlite）│
 └──────────────────────────────────────┘
@@ -34,7 +34,7 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 
 | 目录 | 职责 |
 |---|---|
-| `src/components/` | 视图与弹窗（InboxView / NextView / ProjectListView / TrashModal / DataModal / SettingsModal …） |
+| `src/components/` | 视图与弹窗（InboxView / NextView / ProjectListView / **HabitsView** / TrashModal / DataModal / SettingsModal …） |
 | `src/store/useTxStore.ts` | Zustand 全局状态：持有 active / inbox / trash 三份列表，封装增删改查调用 |
 | `src/services/transactionService.ts` | 纯业务逻辑（类别迁移规则、`canNext`、来源文案），UI 只调不写规则 |
 | `src/hooks/` | 可复用交互原语：`useListDrag`（指针拖拽）、`useSelection`（多选）、`useLifecycle`（提醒轮询） |
@@ -54,7 +54,7 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 | `id` / `sync_id` | 本地自增 id；`sync_id` 为 UUID，为将来云同步预留稳定全局标识 |
 | `title` / `note` | 标题 / 备注 |
 | `status` | 生命周期：`inbox`（未整理）/ `active`（已整理进行中）/ `completed`（已完成） |
-| `category` | 类别：`next_action` / `project` / `waiting` / `someday`（`inbox` 阶段可为空） |
+| `category` | 类别：`next_action` / `project` / `waiting` / `someday` / **`habit`**（`inbox` 阶段可为空） |
 | `deadline_type` / `deadline_date` | 时间要求：`none` / `today` / `week` / `month` / `date`（具体日期） |
 | `priority` | 优先级 1–5（5 最急；默认 1，用户有意为之） |
 | `parent_id` | 父事务 id；`NULL` 表示顶层。构成「Project → 子事务」的树 |
@@ -102,6 +102,17 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 - **彻底删除 / 清空**：向下收集所有后代 → 物理 `DELETE`，不可恢复。
 
 > 结论：靠"恢复"这个动作永远不会造出"子 active、父在回收站"的状态；只有你主动"恢复父、留子在回收站"的选择性恢复会出现，且子是正常待恢复的。
+
+### Habits 循环
+
+`category='habit'` 的记录也走同一状态机，但 `Completed` 不是终点：
+
+- 用户勾选 habit → `status='completed'`、`completed_time=现在`；视觉上置底灰显，但**不软删除**。
+- 每日 **06:00**（本地时间），`resetHabits` 把所有昨天及更早完成的 habit 重置回 `status='active'`、`completed_time=null`，以便第二天重新打勾。
+- 06:00 之前打开 app 不会提前清空：阈值取「最近的 06:00 边界」，避免凌晨误清。
+- Habits **不自动进 Next**；需要时把 habit 拖到其它视图即可转回普通事务。
+
+> 实现：`useHabitReset` 负责 06:00 定时器；`loadActive` 启动后补跑一次，保证 6 点后打开也能当天重置。
 
 ---
 

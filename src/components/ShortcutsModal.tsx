@@ -12,6 +12,7 @@ const SHORTCUTS: { key: string; desc: string }[] = [
   { key: "3", desc: "切换到 Projects 视图" },
   { key: "4", desc: "切换到 Waiting for 视图" },
   { key: "5", desc: "切换到 Someday 视图" },
+  { key: "6", desc: "切换到 Habits 视图" },
   { key: "Enter", desc: "快速新增 / 快速保存" },
   { key: "Esc", desc: "关闭当前窗口" },
 ];

@@ -26,6 +26,7 @@ const CATEGORY_HINTS: Record<Category, string> = {
   project: "需要多步推进的目标，可拆成子事务。",
   waiting: "在等别人或外部条件，设了时间要求到期会自动进 Next，记得定期回顾别漏掉。",
   someday: "也许将来想做，先记着，不占用当下精力。",
+  habit: "每天重复、需要坚持的事，完成后次日自动复位重新开始。",
 };
 
 import EditModal from "./EditModal";

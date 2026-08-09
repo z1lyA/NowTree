@@ -40,3 +40,23 @@ export function useDeadlineNormalize(normalize: () => void) {
 export function useToastSubscription(showToast: (m: string) => void) {
   useEffect(() => onToast(showToast), [showToast]);
 }
+
+// 1.1.0：Habits 每日重置定时器。安排到「下一个 06:00」触发一次 resetHabits，
+// 之后递归排下一天。若 app 在 6:00 未运行，启动时的 loadActive 已补做一次，不致漏重置。
+export function useHabitReset(reset: () => void) {
+  useEffect(() => {
+    let timeoutId: number;
+    const scheduleNextSix = () => {
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0, 0);
+      if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+      const ms = next.getTime() - now.getTime();
+      timeoutId = window.setTimeout(() => {
+        reset();
+        scheduleNextSix();
+      }, ms);
+    };
+    scheduleNextSix();
+    return () => clearTimeout(timeoutId);
+  }, [reset]);
+}

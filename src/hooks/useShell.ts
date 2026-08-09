@@ -21,6 +21,8 @@ export interface UseShellDeps {
   loadTrash: () => void | Promise<void>;
   isDev: boolean;
   setDataOpen: (v: boolean) => void;
+  /** 关闭确认弹出前，先收起其他覆盖层（如每日启动弹窗），保证关闭确认框始终置顶 */
+  dismissOverlays: () => void;
 }
 
 export interface UseShellReturn {
@@ -44,7 +46,7 @@ export interface UseShellReturn {
 }
 
 export function useShell(deps: UseShellDeps): UseShellReturn {
-  const { showToast, loadActive, loadInbox, loadTrash, isDev, setDataOpen } = deps;
+  const { showToast, loadActive, loadInbox, loadTrash, isDev, setDataOpen, dismissOverlays } = deps;
   const [autostart, setAutostart] = useState(false);
   const [checkSoundOn, setCheckSoundOn] = useState(true);
   const [importMeta, setImportMeta] = useState<BackupMeta | null>(null);
@@ -72,6 +74,10 @@ export function useShell(deps: UseShellDeps): UseShellReturn {
             else invoke("minimize_to_tray");
             return;
           }
+          dismissOverlays();
+          // 1.1.0：同时收起数据弹窗内的应用内二级确认，避免关闭确认框与之叠层
+          setResetConfirmOpen(false);
+          setImportMeta(null);
           setCloseConfirm(true);
         });
       } catch {
