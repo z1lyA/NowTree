@@ -58,6 +58,19 @@ describe("normalizeDeadline", () => {
     const r = normalizeDeadline("week", null);
     expect(r.type).toBe("week");
   });
+  it("1.1.1：明天——锚点日=今天时归一成今日", () => {
+    const today = new Date();
+    const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const r = normalizeDeadline("tomorrow", d, today);
+    expect(r.type).toBe("today");
+    expect(r.date).toBeNull();
+  });
+  it("1.1.1：下周——锚点日=本周周日时归一成本周", () => {
+    const base = new Date(2026, 7, 19, 10, 0, 0); // 2026-08-19 周三，本周周日=2026-08-23
+    const r = normalizeDeadline("next_week", "2026-08-23", base);
+    expect(r.type).toBe("week");
+    expect(r.date).toBeNull();
+  });
 });
 
 describe("排序比较器", () => {
@@ -151,6 +164,14 @@ describe("截止时间 / 逾期", () => {
     expect(resolveDeadline("month", null, base)).toEqual({ type: "month", date: "2026-08-31" });
     expect(resolveDeadline("date", "2026-09-10", base)).toEqual({ type: "date", date: "2026-09-10" });
     expect(resolveDeadline("none", null, base)).toEqual({ type: "none", date: null });
+  });
+  it("1.1.1：resolveDeadline——明天解出明天日期", () => {
+    const base = new Date(2026, 7, 17, 12, 0, 0); // 2026-08-17 周一
+    expect(resolveDeadline("tomorrow", null, base)).toEqual({ type: "tomorrow", date: "2026-08-18" });
+  });
+  it("1.1.1：resolveDeadline——下周解出下周周日（本周周日+7）", () => {
+    const base = new Date(2026, 7, 17, 12, 0, 0); // 2026-08-17 周一，本周周日=2026-08-23，下周周日=2026-08-30
+    expect(resolveDeadline("next_week", null, base)).toEqual({ type: "next_week", date: "2026-08-30" });
   });
   it("isDeadlineOverdue：today 锚定 deadline_date，与创建时刻无关", () => {
     const created = new Date(2026, 0, 1).toISOString(); // 很早创建

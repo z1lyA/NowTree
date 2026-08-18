@@ -49,7 +49,7 @@ interface TransactionFormProps {
   resetKey?: number;
 }
 
-const DEADLINES: DeadlineType[] = ["none", "today", "week", "month", "date"];
+const DEADLINES: DeadlineType[] = ["none", "today", "tomorrow", "week", "next_week", "month", "date"];
 
 function formatReminder(iso: string) {
   return iso.replace("T", " ");

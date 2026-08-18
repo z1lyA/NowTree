@@ -716,5 +716,8 @@ body.dragging-active .dropdown-menu {
 .startup-empty { font-size: 12px; }
 .startup-task-list { margin: 0; padding-left: 18px; font-size: 14px; }
 .startup-task-list li { margin: 3px 0; }
+/* 1.1.1：启动弹窗内习惯小节标题——与常规任务隔开一点距离 */
+.startup-habit-label { font-size: 13px; margin: 10px 0 4px; opacity: .85; }
+.startup-habit-list li { color: var(--habit-accent, var(--text)); }
 .startup-quote { font-style: italic; color: var(--text-muted); margin: 0 0 10px; font-size: 14px; opacity: .9; }
 .startup-rest { font-size: 16px; margin: 12px 0; color: var(--text); }

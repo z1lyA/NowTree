@@ -290,13 +290,19 @@ export const useTxStore = create<TxStore>((set, get) => ({
     set({ trash: [] });
   },
 
-  // 0.1.18 + 1.0.2：启动或跨天时，把 deadline_type=date 且 deadline_date=今天的事务自动归一为 today，
-  // 并借 resolveDeadline 把"今日"锚点日期写入 deadline_date（而非清空），避免失去锚点。
+  // 0.1.18 + 1.0.2：启动或跨天时，把需归一的相对/具体截止日翻成"今日/本周"，
+  // 并借 resolveDeadline 把锚点日期写入 deadline_date（而非清空），避免失去锚点。
+  // 1.1.1：范围由仅 date 扩为也含 tomorrow / next_week（二者同样解出确定锚点日，跨天翻成 today/week）。
   normalizeDeadlines: async () => {
     const today = new Date();
     const jobs: Promise<void>[] = [];
     for (const t of get().active) {
-      if (t.deadline_type === "date" && t.deadline_date) {
+      if (
+        (t.deadline_type === "date" ||
+          t.deadline_type === "tomorrow" ||
+          t.deadline_type === "next_week") &&
+        t.deadline_date
+      ) {
         const norm = normalizeDeadline(t.deadline_type, t.deadline_date, today);
         const dl = resolveDeadline(norm.type, norm.date, today);
         if (dl.type !== t.deadline_type || dl.date !== t.deadline_date) {

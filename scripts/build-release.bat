@@ -20,9 +20,19 @@ set "LIB=%SDK_LIB%\um\x64;%SDK_LIB%\ucrt\x64;%MSVC_LIB%"
 
 cd /d "%~dp0.."
 
-echo [NowTree] regenerating icons from official source (src-tauri\icons\source.png)...
-if exist "src-tauri\icons\source.png" (
-    call npm run tauri icon -- src-tauri/icons/source.png
+REM 仅在 source.png 相对上次提交有变动时才重生成图标，
+REM 避免每次打包都触发 tauri icon 导致 icon.icns 产生无意义的字节伪差异（见 git 历史）。
+set "SRC=src-tauri\icons\source.png"
+if exist "%SRC%" (
+    for /f "delims=" %%h in ('git hash-object "%SRC%"') do set "CUR_HASH=%%h"
+    set "BASE_HASH="
+    for /f "delims=" %%b in ('git rev-parse "HEAD:src-tauri/icons/source.png" 2^>nul') do set "BASE_HASH=%%b"
+    if not "%CUR_HASH%"=="%BASE_HASH%" (
+        echo [NowTree] 检测到 source.png 变动，重新生成图标...
+        call npm run tauri icon -- "%SRC%"
+    ) else (
+        echo [NowTree] source.png 未变动，跳过图标重生成。
+    )
 ) else (
     echo [NowTree] WARNING: source.png not found, using existing icons
 )

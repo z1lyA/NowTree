@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTxStore } from "../store/useTxStore";
 import type { Transaction } from "../types/transaction";
-import { byOrder, CAT_MAP } from "../types/transaction";
+import { byOrder, CAT_MAP, TIME_SLOT_LABELS } from "../types/transaction";
 
 import EditModal from "./EditModal";
 import AddModal from "./AddModal";
@@ -202,6 +202,18 @@ export default function HabitsView() {
               />
               {!selMode && (
                 <div className="tx-actions">
+                  {/* 1.1.1：习惯可选时段（复用 time_slot 字段，不新增列）。三个按钮切换早/午/晚，
+                      点已选中的再点一次→清回无时段；样式沿用「加入 Next」的高亮（.on）。 */}
+                  {(["morning", "noon", "evening"] as const).map((s) => (
+                    <button
+                      key={s}
+                      className={"btn-ghost slot-btn" + (t.time_slot === s ? " on" : "")}
+                      title={"设为" + TIME_SLOT_LABELS[s]}
+                      onClick={() => updateTx(t.id, { time_slot: t.time_slot === s ? "none" : s })}
+                    >
+                      {s === "morning" ? "早" : s === "noon" ? "午" : "晚"}
+                    </button>
+                  ))}
                   <button
                     className="btn-ghost"
                     onClick={() => {

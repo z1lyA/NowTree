@@ -3,7 +3,7 @@
 
 export type Status = "inbox" | "active" | "completed";
 export type Category = "next_action" | "project" | "waiting" | "someday" | "habit";
-export type DeadlineType = "none" | "today" | "week" | "month" | "date";
+export type DeadlineType = "none" | "today" | "tomorrow" | "week" | "next_week" | "month" | "date";
 // 0.1.16：Next 三时段分配（早/午/晚），none 表示未分配时段
 export type TimeSlot = "none" | "morning" | "noon" | "evening";
 
@@ -46,12 +46,23 @@ export interface TxFields {
 }
 
 // 0.1.16：日期检测——若选了「具体日期」且日期正好是今天，自动归一成「今日」并清空日期。
-// 这样列表/启动弹窗/排序都能统一按 today 处理，避免「今天」被当成未来的具体日期。
+// 1.1.1：扩展「明天 / 下周」——它们也解出确定锚点日，跨天自动翻成「今日 / 本周」。
+// 这样列表/启动弹窗/排序都能统一按 today/week 处理，避免「今天/本周」被当成未来日期。
 export function normalizeDeadline(
   type: DeadlineType,
   date: string | null,
   base: Date = new Date(),
 ): { type: DeadlineType; date: string | null } {
+  // 明天：锚点日 == 今天 → 翻成「今日」（今天选明天，明天打开自动变今日）
+  if (type === "tomorrow") {
+    if (date && date === fmtDate(base)) return { type: "today", date: null };
+    return { type, date };
+  }
+  // 下周：锚点日 == 本周周日 → 翻成「本周」（本周选下周，跨过周日 24:00 打开自动变本周）
+  if (type === "next_week") {
+    if (date && date === fmtDate(weekRange(base).sun)) return { type: "week", date: null };
+    return { type, date };
+  }
   if (type !== "date" || !date) return { type, date };
   const y = base.getFullYear();
   const m = base.getMonth() + 1;
@@ -64,6 +75,8 @@ export function normalizeDeadline(
 // 1.0.2：把「时间要求」落地为 { type, date }。相对类型（today/week/month）额外把
 // 锚点日期写入 deadline_date，使判定逻辑锚定「最后一次修改时间要求那一刻」而非创建时刻——
 // 用户重新选择「今日/本周/本月」即刷新锚点；具体日期原样保留；无则清空。
+// 1.1.1：新增「明天 / 下周」——分别解出"明天"与"下周周日"作为锚点写入 deadline_date，
+// 与 today/week/month 一致锚定"修改时刻"，跨天后由 normalizeDeadline 翻成今日/本周。
 // base 默认当前时间，即"修改时刻"。
 export function resolveDeadline(
   type: DeadlineType,
@@ -73,7 +86,13 @@ export function resolveDeadline(
   if (type === "none") return { type, date: null };
   if (type === "date") return { type, date: date || null };
   if (type === "today") return { type, date: fmtDate(base) };
+  if (type === "tomorrow") return { type, date: fmtDate(new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1)) };
   if (type === "week") return { type, date: fmtDate(weekRange(base).sun) };
+  if (type === "next_week") {
+    const nw = new Date(weekRange(base).sun);
+    nw.setDate(nw.getDate() + 7); // 本周周日 + 7 天 = 下周周日
+    return { type, date: fmtDate(nw) };
+  }
   // month：取 base 所在月的最后一天
   const last = new Date(base.getFullYear(), base.getMonth() + 1, 0);
   return { type, date: fmtDate(last) };
@@ -148,7 +167,9 @@ export const CATEGORY_META: Record<
 export const DEADLINE_LABELS: Record<DeadlineType, string> = {
   none: "无",
   today: "今日",
+  tomorrow: "明天",
   week: "本周",
+  next_week: "下周",
   month: "本月",
   date: "具体日期",
 };
@@ -180,6 +201,13 @@ export const DEADLINE_SPEC: Record<DeadlineType, DeadlineSpec> = {
       return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59, 59, 999);
     },
   },
+  tomorrow: {
+    label: (b) => `明天（${b.getMonth() + 1}.${b.getDate() + 1}）`,
+    end: (b, date) => {
+      const anchor = date ? parseDate(date) : new Date(b.getFullYear(), b.getMonth(), b.getDate() + 1);
+      return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59, 59, 999);
+    },
+  },
   week: {
     label: (b) => {
       const { mon, sun } = weekRange(b);
@@ -189,6 +217,26 @@ export const DEADLINE_SPEC: Record<DeadlineType, DeadlineSpec> = {
       const anchor = date ? parseDate(date) : b;
       const { sun } = weekRange(anchor);
       return new Date(sun.getFullYear(), sun.getMonth(), sun.getDate(), 23, 59, 59, 999);
+    },
+  },
+  next_week: {
+    label: (b) => {
+      const sun = weekRange(b).sun;
+      const nwMon = new Date(sun);
+      nwMon.setDate(sun.getDate() + 1); // 下周周一
+      const nwSun = new Date(sun);
+      nwSun.setDate(sun.getDate() + 7); // 下周周日
+      return `下周（${nwMon.getMonth() + 1}.${nwMon.getDate()}-${nwSun.getMonth() + 1}.${nwSun.getDate()}）`;
+    },
+    end: (b, date) => {
+      const anchor = date
+        ? parseDate(date)
+        : (() => {
+            const nw = new Date(weekRange(b).sun);
+            nw.setDate(nw.getDate() + 7);
+            return nw;
+          })();
+      return new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59, 59, 999);
     },
   },
   month: {
