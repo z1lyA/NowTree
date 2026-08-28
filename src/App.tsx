@@ -4,7 +4,6 @@ import InboxView from "./components/InboxView";
 import CategoryListView from "./components/CategoryListView";
 import ProjectListView from "./components/ProjectListView";
 import NextView from "./components/NextView";
-import HabitsView from "./components/HabitsView";
 import StartupModal from "./components/StartupModal";
 import { currentClockSlot } from "./utils/clock";
 import TrashModal from "./components/TrashModal";
@@ -23,13 +22,12 @@ import { useShell } from "./hooks/useShell";
 import {
   useReminderScan,
   useDeadlineNormalize,
-  useHabitReset,
   useToastSubscription,
 } from "./hooks/useLifecycle";
 
 // 侧边栏导航 key。
 // inbox → InboxView；project → 专用 ProjectListView（树状）；next/waiting/someday → 通用 CategoryListView。
-type ViewKey = "inbox" | "next" | "project" | "waiting" | "someday" | "habit";
+type ViewKey = "inbox" | "next" | "project" | "waiting" | "someday";
 
 // 侧边栏导航项：inbox 固定；四类从 CATEGORY_META 派生 navLabel（C4：单一来源，新增类别只改一处）。
 const NAV: { key: ViewKey; label: string }[] = [
@@ -79,14 +77,12 @@ export default function App() {
   const loadTrash = useTxStore((s) => s.loadTrash);
   const checkReminders = useTxStore((s) => s.checkReminders);
   const normalizeDeadlines = useTxStore((s) => s.normalizeDeadlines);
-  const resetHabits = useTxStore((s) => s.resetHabits);
 
   // 0.1.19：toast / 主题 / 提醒扫描 / deadline 归一 抽离为独立 hook，降低 App 体积。
   const { toast, toastAction, showToast } = useToast();
   const { theme, chooseTheme } = useTheme();
   useReminderScan(checkReminders);
   useDeadlineNormalize(normalizeDeadlines);
-  useHabitReset(resetHabits);
   useToastSubscription(showToast);
 
   // 挂载：预拉取 active；请求通知权限。
@@ -207,7 +203,6 @@ export default function App() {
         "3": "project",
         "4": "waiting",
         "5": "someday",
-        "6": "habit",
       };
       const v = map[e.key];
       if (v) {
@@ -313,7 +308,7 @@ export default function App() {
               </button>
               <div className="side-menu-sep" />
               <div className="side-menu-motto">种一棵树最好的时间是十年前，其次是现在</div>
-              <div className="side-menu-version">v1.1.1 · 本地 SQLite</div>
+              <div className="side-menu-version">v1.1.2 · 本地 SQLite</div>
             </div>
           )}
         </div>
@@ -326,7 +321,6 @@ export default function App() {
         {view === "project" && <ProjectListView />}
         {view === "waiting" && <CategoryListView category="waiting" />}
         {view === "someday" && <CategoryListView category="someday" />}
-        {view === "habit" && <HabitsView />}
       </main>
 
       {trashOpen && <TrashModal onClose={() => setTrashOpen(false)} />}

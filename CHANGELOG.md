@@ -4,6 +4,34 @@
 
 ---
 
+## 1.1.2（2026-08-28）
+
+本版本移除 Habits 体系，并将「展示在 Next」开关从 Next 行内移到编辑弹窗（与 Waiting / Someday 视图同款）。另新增「时段分界线」自定义。全部为零 Rust 改动、零数据库迁移。
+
+### 新功能：时段分界线自定义（设置 → 时段分界线）
+- 用户可在「设置」里点「时段分界线」，自定义 早 / 午 / 晚 各自的**起点小时**（仅小时粒度，无分钟）。
+- 默认沿用原值：早 6 / 午 13 / 晚 18；休息段 = 00:00 至「早」起点，自动跟随 morningStart。
+- 约束 `0 < 早 < 午 < 晚 ≤ 24`，非法组合会提示且禁止保存；可一键「恢复默认」。
+- 改动写入 localStorage，**立即生效、无需重启**；启动弹窗的按时钟过滤随之更新。
+- 纯前端配置（`src/utils/slotBounds.ts` + `clock.ts` 读取），零 Rust 改动、零数据库迁移，与任务 `time_slot` 标签互不干扰。
+
+### 移除：Habits 视图及对应功能
+- 移除侧边栏「Habits」入口、Habits 视图及全部 habit 相关逻辑（拖拽排序 / 软删除 / 时段分配 / 每日 6 点重置定时器 / 启动弹窗「习惯」小节 / 数字键 6 切换）。
+- habit 纯前端概念（仅 `category='habit'` 文本值），后端零结构改动；本次移除即为纯代码删除，数据库表结构无需任何调整。
+- 库里既有 `category='habit'` 记录**不自动清理**，由你手动决定：用 DB Browser 打开 `%APPDATA%\com.nowtree.app\nowtree.sqlite`，执行 `DELETE FROM transactions WHERE category = 'habit';` 即可彻底清除（不影响任何其它数据）。不删也无害——它们不命中任何视图过滤，不会显示、不会报错。
+
+### 新功能：编辑弹窗内「展示在 Next」开关（与 Waiting / Someday 同款）
+- Next 视图行内**不再**放置开关，改为在「编辑」弹窗内提供，与 Waiting / Someday 视图里的「在 Next ✓ / 加入 Next」按钮**同一组件、同款样式**。
+- 编辑任意**凭 `show_in_next` 透出的外来项**（Waiting / Someday / Project 子项，非原生 Next Action 顶层、非 Inbox）时，弹窗内显示「展示在 Next」一行：点击即时翻转 `show_in_next`，无需保存即生效。
+- 典型用法：Waiting 项因到期自动进了 Next，你想把日期推后、等下次再弹出来，现在可在 Next 里点「编辑」，于弹窗内「取消展示」+ 改日期；改日期时 Waiting 自动晋升标记会被重置（`wait_auto_next` 复位为 0），到新日期会再次自动进 Next。
+- 原生 Next Action（顶层）恒在 Next，弹窗内不显示此开关；想重新展示已取消的项，回原视图重新加入 Next 即可。
+
+### 工程
+- 版本号四处（package.json / tauri.conf.json / Cargo.toml / App.tsx）升至 `1.1.2`。
+- 测试：`tsc --noEmit` 0 错；`vitest run` 46 项全部通过。
+
+---
+
 ## 1.1.1（2026-08-17）
 
 本版本包含两项增强：新增「明天 / 下周」两个时间要求、习惯可选早/午/晚时段并在启动弹窗按时段展示。全部为零 Rust 改动、零数据库迁移，沿用既有 `deadline_type` / `time_slot` 自由文本列。

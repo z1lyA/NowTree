@@ -164,6 +164,17 @@ export default function NextView({
     setClearConfirm(false);
   }
 
+  // 1.1.2：Next 行内不再放「展示在 Next」开关——该开关已移到「编辑」弹窗内（与 Waiting/Someday 同款）。
+  // 行内只保留「编辑」入口，展示开关 / 改日期等管理动作统一在编辑窗口完成。
+  const renderRowActions = (t: Transaction) => {
+    if (selMode || dragId != null) return null;
+    return (
+      <button className="btn-ghost" onClick={() => setEditing(t)}>
+        编辑
+      </button>
+    );
+  };
+
   // ===== 拖拽：长按后在同栏内拖动排序；或拖到其它时段/左栏改分配 =====
   function slotOfId(id: number): TimeSlot | "left" {
     const t = items.find((x) => x.id === id);
@@ -599,13 +610,7 @@ export default function NextView({
                 showSource
                 expandedNoteId={expandedNoteId}
                 setExpandedNoteId={setExpandedNoteId}
-                actions={
-                  !selMode && dragId == null && (
-                    <button className="btn-ghost" onClick={() => setEditing(t)}>
-                      编辑
-                    </button>
-                  )
-                }
+                actions={renderRowActions(t)}
               />
             ))}
             {left.length === 0 && <li className="next-empty muted">都分配好啦 🎉</li>}
@@ -683,13 +688,7 @@ export default function NextView({
                 showSource
                 expandedNoteId={expandedNoteId}
                 setExpandedNoteId={setExpandedNoteId}
-                actions={
-                  !selMode && dragId == null && (
-                    <button className="btn-ghost" onClick={() => setEditing(t)}>
-                      编辑
-                    </button>
-                  )
-                }
+                actions={renderRowActions(t)}
               />
                     ))}
                     {slotItems[slot].length === 0 && (

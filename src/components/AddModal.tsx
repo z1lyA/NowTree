@@ -14,7 +14,6 @@ const TITLE_TEXT: Record<AddCategory, string> = {
   project: "新增 Project 事务",
   waiting: "新增 Waiting 事务",
   someday: "新增 Someday 事务",
-  habit: "新增习惯",
   inbox: "新增 Inbox 记录",
 };
 
@@ -63,7 +62,6 @@ export default function AddModal({
         }}
         inbox={isInbox}
         showCategory={false}
-        habit={category === "habit"}
         submitLabel="新增"
         onCancel={onClose}
         onSubmit={handleCreate}

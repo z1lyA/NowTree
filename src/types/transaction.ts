@@ -2,7 +2,7 @@
 // 对应 docs/DESIGN.md 第 3 节
 
 export type Status = "inbox" | "active" | "completed";
-export type Category = "next_action" | "project" | "waiting" | "someday" | "habit";
+export type Category = "next_action" | "project" | "waiting" | "someday";
 export type DeadlineType = "none" | "today" | "tomorrow" | "week" | "next_week" | "month" | "date";
 // 0.1.16：Next 三时段分配（早/午/晚），none 表示未分配时段
 export type TimeSlot = "none" | "morning" | "noon" | "evening";
@@ -126,7 +126,7 @@ export const TIME_SLOT_LABELS: Record<TimeSlot, string> = {
 };
 
 // 业务常量（UI 与逻辑共用）
-export const CATEGORIES: Category[] = ["next_action", "project", "waiting", "someday", "habit"];
+export const CATEGORIES: Category[] = ["next_action", "project", "waiting", "someday"];
 // 导航栏 data-cat 值 → 实际 Category（"next" 对应 next_action）。
 // 0.1.20：从各视图局部拷贝（GenericListView / ProjectListView / NextView.startSlotDrag）
 // 收敛到此处单一来源，避免规则漂移。
@@ -135,14 +135,12 @@ export const CAT_MAP: Record<string, Category> = {
   project: "project",
   waiting: "waiting",
   someday: "someday",
-  habit: "habit",
 };
 export const CATEGORY_LABELS: Record<Category, string> = {
   next_action: "Next Action",
   project: "Project",
   waiting: "Waiting for",
   someday: "Someday",
-  habit: "Habit",
 };
 export const STATUS_LABELS: Record<Status, string> = {
   inbox: "未整理",
@@ -160,7 +158,6 @@ export const CATEGORY_META: Record<
   project: { label: "Project", navLabel: "Projects", addTitle: "新增 Project 事务" },
   waiting: { label: "Waiting for", navLabel: "Waiting for", addTitle: "新增 Waiting 事务" },
   someday: { label: "Someday", navLabel: "Someday", addTitle: "新增 Someday 事务" },
-  habit: { label: "Habit", navLabel: "Habits", addTitle: "新增习惯" },
 };
 
 // 基础标签（不含具体日期）；带日期的选项用 deadlineOptionLabel() 生成

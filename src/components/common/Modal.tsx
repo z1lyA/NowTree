@@ -8,12 +8,22 @@ interface ModalProps {
   onClose: () => void;
   children: ReactNode;
   onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
+  // 是否允许 Esc 关闭；嵌套弹窗（如设置内的子弹窗）打开时，
+  // 将外层弹窗的此项置 false，避免一次 Esc 把内外两层一起关掉。
+  closeOnEsc?: boolean;
 }
 
-export default function Modal({ title, onClose, children, onKeyDown }: ModalProps) {
+export default function Modal({
+  title,
+  onClose,
+  children,
+  onKeyDown,
+  closeOnEsc = true,
+}: ModalProps) {
   // 0.1.13：Esc 关闭当前弹窗（编辑 / 新增 / 整理 / 快捷键 / 回收站等）。
   // 批量转换模式下，ConvertModal 的 onClose 即「中断批量」，故 Esc 也会正确中断。
   useEffect(() => {
+    if (closeOnEsc === false) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -22,7 +32,7 @@ export default function Modal({ title, onClose, children, onKeyDown }: ModalProp
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, closeOnEsc]);
 
   return (
     <div

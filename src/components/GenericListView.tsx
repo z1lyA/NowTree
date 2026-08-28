@@ -26,7 +26,6 @@ const CATEGORY_HINTS: Record<Category, string> = {
   project: "需要多步推进的目标，可拆成子事务。",
   waiting: "在等别人或外部条件，设了时间要求到期会自动进 Next，记得定期回顾别漏掉。",
   someday: "也许将来想做，先记着，不占用当下精力。",
-  habit: "每天重复、需要坚持的事，完成后次日自动复位重新开始。",
 };
 
 import EditModal from "./EditModal";
@@ -42,6 +41,7 @@ import { useSelection } from "../hooks/useSelection";
 import { useListActions } from "../hooks/useListActions";
 import { buildCategoryPatch, canShowInNext } from "../services/transactionService";
 import ListToolbar from "./ListToolbar";
+import NextToggleButton from "./NextToggleButton";
 
 type ListViewMode = "inbox" | Category;
 
@@ -332,12 +332,7 @@ export default function GenericListView({ mode }: GenericListViewProps) {
                     </button>
                   )}
                   {!inboxMode && canShowInNext(mode) && (
-                    <button
-                      className={`btn-ghost ${t.show_in_next ? "on" : ""}`}
-                      onClick={() => { setDeletingId(null); updateTx(t.id, { show_in_next: !t.show_in_next }); }}
-                    >
-                      {t.show_in_next ? "在 Next ✓" : "加入 Next"}
-                    </button>
+                    <NextToggleButton t={t} onBeforeToggle={() => setDeletingId(null)} />
                   )}
                   <button className="btn-ghost" onClick={() => { setDeletingId(null); setEditing(t); }}>
                     编辑

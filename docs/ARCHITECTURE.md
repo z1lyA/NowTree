@@ -34,7 +34,7 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 
 | 目录 | 职责 |
 |---|---|
-| `src/components/` | 视图与弹窗（InboxView / NextView / ProjectListView / **HabitsView** / TrashModal / DataModal / SettingsModal …） |
+| `src/components/` | 视图与弹窗（InboxView / NextView / ProjectListView / TrashModal / DataModal / SettingsModal …） |
 | `src/store/useTxStore.ts` | Zustand 全局状态：持有 active / inbox / trash 三份列表，封装增删改查调用 |
 | `src/services/transactionService.ts` | 纯业务逻辑（类别迁移规则、`canNext`、来源文案），UI 只调不写规则 |
 | `src/hooks/` | 可复用交互原语：`useListDrag`（指针拖拽）、`useSelection`（多选）、`useLifecycle`（提醒轮询） |
@@ -54,17 +54,19 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 | `id` / `sync_id` | 本地自增 id；`sync_id` 为 UUID，为将来云同步预留稳定全局标识 |
 | `title` / `note` | 标题 / 备注 |
 | `status` | 生命周期：`inbox`（未整理）/ `active`（已整理进行中）/ `completed`（已完成） |
-| `category` | 类别：`next_action` / `project` / `waiting` / `someday` / **`habit`**（`inbox` 阶段可为空） |
+| `category` | 类别：`next_action` / `project` / `waiting` / `someday`（`inbox` 阶段可为空） |
 | `deadline_type` / `deadline_date` | 时间要求：`none` / `today` / `week` / `month` / `date`（具体日期） |
 | `priority` | 优先级 1–5（5 最急；默认 1，用户有意为之） |
 | `parent_id` | 父事务 id；`NULL` 表示顶层。构成「Project → 子事务」的树 |
-| `time_slot` | Next 视图的三时段：`none` / `morning` / `noon` / `evening` |
+| `time_slot` | Next 视图的三时段（`**任务级标签**`，手动指定）：`none` / `morning` / `noon` / `evening` |
 | `show_in_next` | 0/1：是否透出到全局 Next 列表（默认 0） |
 | `deleted` | 软删除标志（0/1）；回收站即 `deleted=1` 的记录 |
 | `deleted_at` | 软删时间戳 |
 | `order_index` | 同层排序序号（拖拽持久化） |
 | `reminder_time` / `reminder_done` | 提醒时间 / 是否已提醒 |
 | `created_time` / `completed_time` / `updated_time` | 时间戳 |
+
+> **时段分界线（时钟→时段映射）与 `time_slot` 列是两回事**：`time_slot` 是任务上手动打的「计划归属时段」标签；而启动弹窗按当前钟点过滤所用的 早 / 午 / 晚 / 休息 分界，由 `src/utils/slotBounds.ts` + `clock.ts` 计算，默认值 早6 / 午13 / 晚18，可在「设置 → 时段分界线」里自定义（仅小时粒度、立即生效、存于 localStorage），与数据库结构无关。
 
 ### 状态机
 
@@ -102,17 +104,6 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 - **彻底删除 / 清空**：向下收集所有后代 → 物理 `DELETE`，不可恢复。
 
 > 结论：靠"恢复"这个动作永远不会造出"子 active、父在回收站"的状态；只有你主动"恢复父、留子在回收站"的选择性恢复会出现，且子是正常待恢复的。
-
-### Habits 循环
-
-`category='habit'` 的记录也走同一状态机，但 `Completed` 不是终点：
-
-- 用户勾选 habit → `status='completed'`、`completed_time=现在`；视觉上置底灰显，但**不软删除**。
-- 每日 **06:00**（本地时间），`resetHabits` 把所有昨天及更早完成的 habit 重置回 `status='active'`、`completed_time=null`，以便第二天重新打勾。
-- 06:00 之前打开 app 不会提前清空：阈值取「最近的 06:00 边界」，避免凌晨误清。
-- Habits **不自动进 Next**；需要时把 habit 拖到其它视图即可转回普通事务。
-
-> 实现：`useHabitReset` 负责 06:00 定时器；`loadActive` 启动后补跑一次，保证 6 点后打开也能当天重置。
 
 ---
 

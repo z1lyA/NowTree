@@ -36,8 +36,6 @@ interface TransactionFormProps {
   inbox?: boolean;
   // 是否显示「类型」分段选择（编辑弹窗在非 inbox 且非 hideCategory 时为 true）。
   showCategory?: boolean;
-  // 1.1.0：习惯（habit）模式——隐藏优先级 / 时间要求 / 提醒（习惯每天重置，不需要这些字段）。
-  habit?: boolean;
   submitLabel: string;
   onCancel: () => void;
   onSubmit: (v: TxFormValues) => void | Promise<void>;
@@ -45,6 +43,8 @@ interface TransactionFormProps {
   extraActions?: ReactNode;
   // 额外字段插槽（如 ConvertModal 的「父事务」选择器），仅在 category==="project" 时渲染。
   parentSelect?: ReactNode;
+  // 额外字段插槽（如 EditModal 的「展示在 Next」开关），渲染在 提醒 之后、操作按钮之前。
+  extraBody?: ReactNode;
   // 批量场景：值变化时把字段重置回 initial（如 AddChildModal 的「添加并继续」）。
   resetKey?: number;
 }
@@ -82,12 +82,12 @@ export default function TransactionForm({
   initial,
   inbox,
   showCategory,
-  habit,
   submitLabel,
   onCancel,
   onSubmit,
   extraActions,
   parentSelect,
+  extraBody,
   resetKey,
 }: TransactionFormProps) {
   const [title, setTitle] = useState(initial.title);
@@ -251,7 +251,7 @@ export default function TransactionForm({
       {/* parentSelect 插槽：如 ConvertModal 的「父事务」选择器，仅 project 类型时渲染 */}
       {!inbox && showCategory && category === "project" && parentSelect}
 
-      {!inbox && !habit && (
+      {!inbox && (
         <>
           <div className="field">
             <span>优先级</span>
@@ -307,8 +307,7 @@ export default function TransactionForm({
         </>
       )}
 
-      {/* 1.1.0：提醒对 habit 也开放（一次性提醒，与全局一致）；inbox 仍隐藏。
-          注：habit 的「一次性提醒」弹过即焚、6 点重置不恢复，故对 habit 只响一次。 */}
+      {/* 提醒：inbox 仍隐藏，其余类别开放（一次性提醒，与全局一致）。 */}
       {!inbox && (
         <div className="field inline-row">
           <span>提醒</span>
@@ -344,6 +343,8 @@ export default function TransactionForm({
           </div>
         </div>
       )}
+
+      {extraBody}
 
       <div className="modal-actions">
         <button className="btn-ghost" onClick={onCancel}>

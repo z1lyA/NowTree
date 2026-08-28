@@ -5,6 +5,7 @@
 import { useState } from "react";
 import Modal from "./common/Modal";
 import TransactionForm, { type TxFormValues } from "./TransactionForm";
+import NextToggleButton from "./NextToggleButton";
 import { useTxStore } from "../store/useTxStore";
 import { normalizeDeadline, resolveDeadline, type Transaction } from "../types/transaction";
 
@@ -17,11 +18,9 @@ interface EditModalProps {
   onDelete?: () => void;
   // 0.1.16：隐藏「类型」分段选择（Project 子事务 / Next 展示项：子事务·waiting·someday 凭 show_in_next 透出）
   hideCategory?: boolean;
-  // 1.1.0：习惯（habit）编辑——隐藏类型选择、优先级 / 时间要求 / 提醒（习惯每天重置，不需要这些）
-  habit?: boolean;
 }
 
-export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory, habit }: EditModalProps) {
+export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }: EditModalProps) {
   const { updateTx, deleteTx } = useTxStore();
   const [confirmDel, setConfirmDel] = useState(false);
 
@@ -96,7 +95,12 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory, 
     onClose();
   }
 
-  const showCategory = !inbox && !hideCategory && !habit;
+  const showCategory = !inbox && !hideCategory;
+
+  // 1.1.2：编辑弹窗内的「展示在 Next」开关（复用 NextToggleButton，与 Waiting/Someday 同款）。
+  // 仅对「凭 show_in_next 透出的外来项」显示（非 inbox、且非原生 next_action 顶层）；
+  // 原生 next_action 靠 category 常驻 Next，开关无意义；inbox 不展示。即时翻转，不随保存。
+  const foreign = !inbox && !(tx.category === "next_action" && tx.parent_id === null);
 
   return (
     <Modal title={inbox ? "编辑灵感" : "编辑事务"} onClose={onClose}>
@@ -112,7 +116,6 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory, 
         }}
         inbox={inbox}
         showCategory={showCategory}
-        habit={habit}
         submitLabel="保存"
         onCancel={onClose}
         onSubmit={handleSave}
@@ -123,6 +126,14 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory, 
           >
             {confirmDel ? "确认删除？" : "删除"}
           </button>
+        }
+        extraBody={
+          foreign ? (
+            <div className="field inline-row">
+              <span>展示在 Next</span>
+              <NextToggleButton t={tx} />
+            </div>
+          ) : undefined
         }
       />
     </Modal>

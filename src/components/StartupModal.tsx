@@ -33,9 +33,8 @@ export default function StartupModal({ onClose }: { onClose: () => void }) {
   const slot = currentClockSlot(now);
   const quote = dailyQuote();
 
-  // 当前时段（非休息）分配到该时段的未完成任务：Next 主线事务 + 同处该时段的 Habit。
-  // habit 不进 Next（show_in_next 恒 false），但启动弹窗按时段展示时一并纳入该时段的习惯。
-  // 1.1.1：拆分 regular（非 habit）与 habits，渲染时习惯列在常规事务下方。
+  // 当前时段（非休息）分配到该时段的未完成任务：Next 主线事务（原生 next_action 顶层）
+  // 与凭 show_in_next 透出的外来项（Project 子项 / Waiting / Someday）。
   const tasks = useMemo<Transaction[]>(() => {
     if (slot === "rest") return [];
     return active
@@ -43,15 +42,11 @@ export default function StartupModal({ onClose }: { onClose: () => void }) {
         (t) =>
           t.status !== "completed" &&
           ((t.category === "next_action" && t.parent_id === null) ||
-            t.show_in_next ||
-            t.category === "habit") &&
+            t.show_in_next) &&
           t.time_slot === slot
       )
       .sort(byOrder);
   }, [active, slot]);
-
-  const regular = useMemo(() => tasks.filter((t) => t.category !== "habit"), [tasks]);
-  const habitTasks = useMemo(() => tasks.filter((t) => t.category === "habit"), [tasks]);
 
   return (
     <Modal title={SLOT_GREETING[slot]} onClose={onClose}>
@@ -65,24 +60,14 @@ export default function StartupModal({ onClose }: { onClose: () => void }) {
           <p className="muted startup-sub">{TIME_SLOT_LABELS[slot]}的任务：</p>
           <div className="startup-slots">
             <div className="startup-slot">
-              {regular.length > 0 && (
+              {tasks.length > 0 && (
                 <ul className="startup-task-list">
-                  {regular.map((t) => (
+                  {tasks.map((t) => (
                     <li key={t.id}>{t.title}</li>
                   ))}
                 </ul>
               )}
-              {habitTasks.length > 0 && (
-                <>
-                  <div className="muted startup-habit-label">习惯</div>
-                  <ul className="startup-task-list startup-habit-list">
-                    {habitTasks.map((t) => (
-                      <li key={t.id}>{t.title}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              {regular.length === 0 && habitTasks.length === 0 && (
+              {tasks.length === 0 && (
                 <div className="muted startup-empty">暂无安排</div>
               )}
             </div>
