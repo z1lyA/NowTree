@@ -8,7 +8,7 @@
 // 0.1.11：灵感无时间/优先度，故去掉排序按钮（inbox 模式）；多选进入后批量功能以边框分组；圆形选中框。
 // 0.1.16：备注默认一行收起，点击展开，点其它地方自动收起（useNoteExpand + Note）。
 // 0.1.17：跨类别拖到左侧导航栏改类别（inbox↔类别禁止互转）。
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useTxStore } from "../store/useTxStore";
 import type { Category, Transaction } from "../types/transaction";
 import {
@@ -39,7 +39,7 @@ import { showToast } from "../toast";
 import { useNoteExpand } from "../hooks/useNoteExpand";
 import { useSelection } from "../hooks/useSelection";
 import { useListActions } from "../hooks/useListActions";
-import { buildCategoryPatch, canShowInNext } from "../services/transactionService";
+import { buildCategoryPatch, canShowInNext, collectSubtreeIds } from "../services/transactionService";
 import ListToolbar from "./ListToolbar";
 import NextToggleButton from "./NextToggleButton";
 
@@ -62,6 +62,7 @@ export default function GenericListView({ mode }: GenericListViewProps) {
     toggleComplete,
     deleteTx,
     reorder,
+    restoreMany,
   } = useTxStore();
 
   const inboxMode = mode === "inbox";
@@ -197,6 +198,20 @@ export default function GenericListView({ mode }: GenericListViewProps) {
 
   const dragTx = dragId != null ? items.find((t) => t.id === dragId) ?? null : null;
 
+  // 1.1.3：拖到垃圾桶删除。Inbox 硬删（removeInbox，无撤销）；类别软删（deleteTx 级联整棵子树）+ 撤销 toast。
+  const handleTrash = useCallback(
+    (id: number) => {
+      if (inboxMode) {
+        removeInbox(id);
+        return;
+      }
+      const sub = collectSubtreeIds(active, id);
+      deleteTx(id);
+      showToast("已删除", { label: "撤销", onClick: () => restoreMany([id, ...sub]) });
+    },
+    [inboxMode, active, removeInbox, deleteTx, restoreMany],
+  );
+
   const titleText = inboxMode ? "Inbox" : CATEGORY_LABELS[mode as Category];
   const hint = inboxMode
     ? "把脑子里冒出来的事先丢进来，稍后再整理成正式事务；点右下角 ＋ 直接记录。"
@@ -291,12 +306,13 @@ export default function GenericListView({ mode }: GenericListViewProps) {
               onPointerDown={(e) => {
                 if (selMode) return;
                 const opts = inboxMode
-                  ? undefined
+                  ? { onTrash: handleTrash }
                   : {
                       allowCrossCat: true,
                       onCatTarget: changeCategoryOnDrop,
                       disabled: t.status === "completed",
                       onDisabledPress: () => showToast("已完成事务无法拖拽"),
+                      onTrash: handleTrash,
                     };
                 startDrag(e, t.id, ordered.map((x) => x.id), reorder, opts);
               }}

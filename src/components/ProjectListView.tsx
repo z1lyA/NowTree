@@ -12,7 +12,7 @@
 //   - Project 子事务编辑隐藏「类型」选项；
 //   - 「加子步骤」改为「批量添加子事项」（连续弹窗，逐个生成子事项直至退出）；
 //   - 布局修复：父事务行右侧工具栏不再挤压子列表，子列表可拉到最右边。
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useTxStore } from "../store/useTxStore";
 import type { Transaction } from "../types/transaction";
 import { byOrder, byPriority, byTime, byCompletion, CAT_MAP } from "../types/transaction";
@@ -29,12 +29,12 @@ import DragGhost from "./DragGhost";
 import ListToolbar from "./ListToolbar";
 import NextToggleButton from "./NextToggleButton";
 import { useListActions } from "../hooks/useListActions";
-import { childrenOf as svcChildrenOf, parentDoneRatioOf } from "../services/transactionService";
+import { childrenOf as svcChildrenOf, parentDoneRatioOf, collectSubtreeIds } from "../services/transactionService";
 
 // 各视图共用的常量（CATEGORIES / CAT_MAP）已收敛到 types/transaction.ts（0.1.20）。
 
 export default function ProjectListView() {
-  const { active, loading, error, loadActive, updateTx, toggleComplete, deleteTx, reorder } =
+  const { active, loading, error, loadActive, updateTx, toggleComplete, deleteTx, reorder, releaseDescendants, restoreMany } =
     useTxStore();
   const [editing, setEditing] = useState<Transaction | null>(null);
   // 0.1.16：子事务编辑隐藏「类型」——记录当前编辑项是否为子事务
@@ -46,7 +46,6 @@ export default function ProjectListView() {
   const [clearConfirm, setClearConfirm] = useState(false);
   // 0.1.13：每个父事务可单独对其子事务排序；childSortFor 记录当前展开子排序菜单的父事务 id
   const [childSortFor, setChildSortFor] = useState<number | null>(null);
-  const [moveHint, setMoveHint] = useState<string>("");
   // 0.1.16：子事务折叠——记录已展开的父事务 id（默认空 = 全部收起）
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const childSortRef = useRef<HTMLDivElement>(null);
@@ -184,20 +183,11 @@ export default function ProjectListView() {
       return ids;
     },
     deleteSelected: async (ids) => { for (const id of ids) await deleteTx(id); },
-    // 0.1.14：父事务若含子事务则禁止移动（会破坏层级）；以 filterMovable 拦截。
+    // 0.1.14 + A(1.1.3)：父事务若含子事务以往禁止批量移动（会破坏层级）；1.1.3 起放开——
+    // 含子父事务可随批量移动离开 Project，整棵子树由 useListActions.moveTo 释放进回收站。
+    // 故此处不再拦截，全部放行。
     filterMovable: (ids) => {
-      const blocked = new Set(
-        projectsOrdered
-          .filter((p) => ids.includes(p.id) && childrenOf(p.id).length > 0)
-          .map((p) => p.id),
-      );
-      return { movable: ids.filter((id) => !blocked.has(id)), blocked: [...blocked] };
-    },
-    onMoved: (blocked) => {
-      if (blocked.length > 0) {
-        setMoveHint("含子事务无法移动");
-        setTimeout(() => setMoveHint(""), 2500);
-      }
+      return { movable: ids, blocked: [] };
     },
   });
   const { cleanCompleted, cancelClean, batchDelete, moveTo } = listActions;
@@ -211,14 +201,20 @@ export default function ProjectListView() {
     if (!c) return;
     updateTx(id, { category: c, clear_parent: true });
   }
-  // 0.1.18：无子父事务跨类别拖拽落点——拖到左侧导航栏改类别。
-  // 规则：inbox 禁止互转；拖到 Project 导航 = 无操作（已在 Project）；
-  //       含子父事务只能排序，此处通过 startDrag 传 disabled 控制；无子父事务正常改。
-  function parentCatTarget(id: number, cat: string) {
+  // 0.1.18 + A(1.1.3)：无子父事务跨类别拖拽落点——拖到左侧导航栏改类别。
+  // 规则：inbox 禁止互转；拖到 Project 导航 = 无操作（已在 Project）；无子父事务正常改；
+  //       含子父事务以往只能排序（startDrag 的 allowCrossCat 拦截）。1.1.3 起放开——
+  //       含子父事务可拖去其它类别，离开 Project 时整棵子树释放进回收站（父自身随改类别保留）。
+  async function parentCatTarget(id: number, cat: string) {
     if (cat === "inbox" || cat === "project") return;
-    if (childrenOf(id).length > 0) return; // 含子父事务不可改类别
     const c = CAT_MAP[cat];
     if (!c) return;
+    const kids = childrenOf(id);
+    if (kids.length > 0) {
+      // A（1.1.3）：含子父事务离开 Project → 整棵子树释放进回收站（不弹确认，直接进回收站可恢复）
+      const released = await releaseDescendants(id);
+      if (released.length > 0) showToast(`已释放 ${released.length} 个子事务进入回收站`);
+    }
     // 离开 Project 上下文：清 parent_id + 重置 time_slot（保持 show_in_next）
     updateTx(id, { category: c, clear_parent: true, time_slot: "none" });
   }
@@ -229,6 +225,17 @@ export default function ProjectListView() {
   }
 
   const dragTx = dragId != null ? active.find((t) => t.id === dragId) ?? null : null;
+
+  // 1.1.3：拖到垃圾桶删除。Project 永非 Inbox，故软删（deleteTx 级联整棵子树）+ 撤销 toast；
+  // 父/子同逻辑，撤销时整棵子树（含后代）一并恢复。
+  const handleTrash = useCallback(
+    (id: number) => {
+      const sub = collectSubtreeIds(active, id);
+      deleteTx(id);
+      showToast("已删除", { label: "撤销", onClick: () => restoreMany([id, ...sub]) });
+    },
+    [active, deleteTx, restoreMany],
+  );
 
   const DeleteButton = ({ t }: { t: Transaction }) => (
     <button
@@ -275,13 +282,6 @@ export default function ProjectListView() {
         onSelectAll={selectAll}
         onClearSel={clearSel}
         onBatchDelete={batchDelete}
-        moveExtra={
-          moveHint ? (
-            <span className="move-hint" style={{ color: "#e0533d", marginLeft: 8, fontSize: 12 }}>
-              {moveHint}
-            </span>
-          ) : null
-        }
       />
 
       <div className="sub-panel" ref={containerRef}>
@@ -325,12 +325,14 @@ export default function ProjectListView() {
               }
               onPointerDown={(e) => {
                 if (selMode) return;
-                const hasChildren = childrenOf(p.id).length > 0;
                 startDrag(e, p.id, projectsOrdered.map((x) => x.id), reorder, {
-                  allowCrossCat: !hasChildren,
+                  // 1.1.3：含子父事务也允许跨类别拖拽——松手到其它类别时由 parentCatTarget
+                  // 把整棵子树释放进回收站（此前仅无子父事务可跨类别，含子父事务只能排序）。
+                  allowCrossCat: true,
                   onCatTarget: parentCatTarget,
                   disabled: parentDone,
                   onDisabledPress: () => showToast("已完成事务无法拖拽"),
+                  onTrash: handleTrash,
                 });
               }}
               onClick={(e) => {
@@ -473,6 +475,7 @@ export default function ProjectListView() {
                               excludeParentId: c.parent_id ?? undefined,
                               disabled: c.status === "completed",
                               onDisabledPress: () => showToast("已完成事务无法拖拽"),
+                              onTrash: handleTrash,
                             });
                           },
                           onClick: (e) => {

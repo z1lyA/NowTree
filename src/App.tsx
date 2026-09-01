@@ -7,6 +7,7 @@ import NextView from "./components/NextView";
 import StartupModal from "./components/StartupModal";
 import { currentClockSlot } from "./utils/clock";
 import TrashModal from "./components/TrashModal";
+import TrashDrop from "./components/TrashDrop";
 import ShortcutsModal from "./components/ShortcutsModal";
 import ThemeModal from "./components/ThemeModal";
 import DataModal from "./components/DataModal";
@@ -308,7 +309,7 @@ export default function App() {
               </button>
               <div className="side-menu-sep" />
               <div className="side-menu-motto">种一棵树最好的时间是十年前，其次是现在</div>
-              <div className="side-menu-version">v1.1.2 · 本地 SQLite</div>
+              <div className="side-menu-version">v1.1.3 · 本地 SQLite</div>
             </div>
           )}
         </div>
@@ -436,6 +437,8 @@ export default function App() {
           }}
         />
       )}
+      {/* 1.1.3：拖拽删除垃圾桶——仅拖拽中显形，挂载于 App 顶层，五视图通用 */}
+      <TrashDrop />
       {toast && (
         <div className="toast">
           <span>{toast}</span>

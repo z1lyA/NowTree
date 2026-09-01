@@ -8,6 +8,7 @@ import TransactionForm, { type TxFormValues } from "./TransactionForm";
 import NextToggleButton from "./NextToggleButton";
 import { useTxStore } from "../store/useTxStore";
 import { normalizeDeadline, resolveDeadline, type Transaction } from "../types/transaction";
+import { showToast } from "../toast";
 
 interface EditModalProps {
   tx: Transaction;
@@ -18,13 +19,16 @@ interface EditModalProps {
   onDelete?: () => void;
   // 0.1.16：隐藏「类型」分段选择（Project 子事务 / Next 展示项：子事务·waiting·someday 凭 show_in_next 透出）
   hideCategory?: boolean;
+  // 1.1.3：是否从 Next 视图打开。仅从 Next 视图打开时，编辑弹窗内才显示「展示在 Next」开关，
+  // 避免 Project 父项 / Waiting·Someday·Project 子项的编辑弹窗重复出现该开关（其 Next 状态由行内开关管理）。
+  fromNext?: boolean;
 }
 
-export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }: EditModalProps) {
-  const { updateTx, deleteTx } = useTxStore();
+export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory, fromNext }: EditModalProps) {
+  const { updateTx, deleteTx, active, releaseDescendants } = useTxStore();
   const [confirmDel, setConfirmDel] = useState(false);
 
-  function handleSave(v: TxFormValues) {
+  async function handleSave(v: TxFormValues) {
     const t = v.title.trim();
     if (!t) return;
     // 备注：空串视为清空。Rust 端 note 是 Option<String>，传 null 会被反序列化为
@@ -32,6 +36,15 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }
     // （与 clear_reminder 同一范式）。非空则照常写入。
     const noteTrim = v.note.trim();
     const notePatch = noteTrim ? { note: noteTrim } : { clear_note: true };
+    // A（1.1.3）：父事务（project）改类别离开 Project，且仍有活跃子事务 →
+    // 整棵子树释放进回收站（父自身随改类别保留），避免子事务从所有视图凭空消失。
+    if (!inbox && tx.category === "project" && v.category !== "project") {
+      const hasKids = active.some((c) => c.parent_id === tx.id);
+      if (hasKids) {
+        const released = await releaseDescendants(tx.id);
+        if (released.length > 0) showToast(`已释放 ${released.length} 个子事务进入回收站`);
+      }
+    }
     if (inbox) {
       // Inbox 灵感编辑：仅改标题与备注，保持 status=inbox、category=null
       updateTx(tx.id, { title: t, ...notePatch });
@@ -97,10 +110,12 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }
 
   const showCategory = !inbox && !hideCategory;
 
-  // 1.1.2：编辑弹窗内的「展示在 Next」开关（复用 NextToggleButton，与 Waiting/Someday 同款）。
-  // 仅对「凭 show_in_next 透出的外来项」显示（非 inbox、且非原生 next_action 顶层）；
-  // 原生 next_action 靠 category 常驻 Next，开关无意义；inbox 不展示。即时翻转，不随保存。
-  const foreign = !inbox && !(tx.category === "next_action" && tx.parent_id === null);
+  // 1.1.3：编辑弹窗内的「展示在 Next」开关（复用 NextToggleButton，与 Waiting/Someday 同款）。
+  // 仅当从 Next 视图打开（fromNext）且非原生 next_action 顶层项时显示；
+  // 原生 next_action 靠 category 常驻 Next，开关无意义；其它视图（Project/Wating/Someday）的
+  // Next 状态由行内开关管理，编辑弹窗内不再重复出现。即时翻转，不随保存。
+  const showNextToggle =
+    !!fromNext && !(tx.category === "next_action" && tx.parent_id === null);
 
   return (
     <Modal title={inbox ? "编辑灵感" : "编辑事务"} onClose={onClose}>
@@ -128,7 +143,7 @@ export default function EditModal({ tx, onClose, inbox, onDelete, hideCategory }
           </button>
         }
         extraBody={
-          foreign ? (
+          showNextToggle ? (
             <div className="field inline-row">
               <span>展示在 Next</span>
               <NextToggleButton t={tx} />

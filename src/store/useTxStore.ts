@@ -5,7 +5,7 @@ import { transactionRepo } from "../data";
 import type { Transaction, Status, Category, TxFields } from "../types/transaction";
 import { normalizeDeadline, resolveDeadline } from "../types/transaction";
 import type { ConvertInput } from "../data/repository";
-import { collectSubtreeIds } from "../services/transactionService";
+import { collectSubtreeIds, collectReleaseIds } from "../services/transactionService";
 import { notify } from "../services/notification";
 
 // 生成当前 ISO 时间；用于完成时间等字段
@@ -52,6 +52,9 @@ interface TxStore {
   toggleComplete: (id: number) => Promise<void>;
   // 第七步：软删除（移出 active）
   deleteTx: (id: number) => Promise<void>;
+  // 1.1.3：父改类别离开 Project 时，把它的整棵后代子树软删进回收站（父自身不动）。
+  // excludeIds 排除「同样被选中的、要被移动」的后代，使其不被释放。返回被释放的 id 列表。
+  releaseDescendants: (parentId: number, excludeIds?: number[]) => Promise<number[]>;
   // 0.1.6：悬浮加号按钮——在当前界面直接新增对应类别的事务（跳过 Inbox 收集）。
   // 业务字段复用 TxFields，仅补上 category/status（C3：统一类型，避免重复字段块）。
   createTx: (
@@ -64,6 +67,13 @@ interface TxStore {
   restoreTx: (id: number) => Promise<void>;
   purgeTx: (id: number) => Promise<void>;
   emptyTrash: () => Promise<void>;
+  // 1.1.3：拖拽中 UI 态（TrashDrop 显隐 + 悬停垃圾桶高亮），由拖拽钩子写入。
+  dragActive: boolean;
+  dragOnTrash: boolean;
+  setDragUI: (patch: { active?: boolean; onTrash?: boolean }) => void;
+  // 1.1.3：拖到垃圾桶删除后的「撤销」——逐条恢复整棵子树。
+  // Rust restore_transaction 只级联 SELF + ANCESTORS（不含后代），故需显式逐条 restore 每个子树成员。
+  restoreMany: (ids: number[]) => Promise<void>;
   // 0.1.18：启动/跨天时扫描，把「具体日期=今天」的 deadline 自动归一为「今日」
   normalizeDeadlines: () => Promise<void>;
   // 1.0.2：Waiting for 设时间要求且已到/逾期的项，自动翻 show_in_next=1 进 Next
@@ -78,6 +88,8 @@ export const useTxStore = create<TxStore>((set, get) => ({
   trash: [],
   loading: false,
   error: null,
+  dragActive: false,
+  dragOnTrash: false,
 
   loadInbox: async () => {
     set({ loading: true, error: null });
@@ -205,6 +217,27 @@ export const useTxStore = create<TxStore>((set, get) => ({
     }
   },
 
+  // 1.1.3：释放某父事务的全部后代进回收站（父自身保留，仅后代 deleted=1）。
+  // 后端软删向下级联：逐条软删每个后代即可，父不受影响；返回被释放的 id 列表，
+  // 供调用方统计数量（toast）或在批量移动时排除这些项。
+  releaseDescendants: async (parentId, excludeIds = []) => {
+    try {
+      const active = get().active;
+      const ids = collectReleaseIds(active, parentId, excludeIds);
+      for (const id of ids) {
+        await transactionRepo.softDelete(id);
+      }
+      if (ids.length) {
+        const remove = new Set(ids);
+        set({ active: active.filter((t) => !remove.has(t.id)) });
+      }
+      return ids;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      return [];
+    }
+  },
+
   // 0.1.6：悬浮加号直接创建。inbox 写入 inbox 列表，其余写入 active。
   createTx: async (input) => {
     try {
@@ -283,6 +316,23 @@ export const useTxStore = create<TxStore>((set, get) => ({
   emptyTrash: async () => {
     await transactionRepo.emptyTrash();
     set({ trash: [] });
+  },
+
+  // 1.1.3：拖拽 UI 态写入（TrashDrop 显隐 + 悬停高亮）。合并补丁，未传字段沿用当前值，
+  // 故「悬停离开垃圾桶」时传 { onTrash:false } 不会误改 dragActive。
+  setDragUI: (patch) =>
+    set((s) => ({
+      dragActive: patch.active ?? s.dragActive,
+      dragOnTrash: patch.onTrash ?? s.dragOnTrash,
+    })),
+
+  // 1.1.3：撤销「拖到垃圾桶删除」——把整棵子树（父 + 所有后代）逐条恢复。
+  // 后端 restore 不级联后代，故必须逐条 restore 每个子树成员，再统一刷新三视图。
+  restoreMany: async (ids) => {
+    for (const id of ids) {
+      await transactionRepo.restore(id);
+    }
+    await Promise.all([get().loadActive(), get().loadInbox(), get().loadTrash()]);
   },
 
   // 0.1.18 + 1.0.2：启动或跨天时，把需归一的相对/具体截止日翻成"今日/本周"，

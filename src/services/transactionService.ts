@@ -61,3 +61,27 @@ export function parentDoneRatioOf(p: Transaction, items: Transaction[]): number 
   if (kids.length === 0) return p.status === "completed" ? 1 : 0;
   return kids.filter((k) => k.status === "completed").length / kids.length;
 }
+
+// A（1.1.3）：父事务改类别离开 Project 时，收集其全部后代 id（不含父自身，含任意层级），
+// 用于整棵子树软删进回收站。excludeIds 用于批量移动：排除「同样被选中、要被移动」的后代，
+// 使其不被释放、而是随父一起改类别（避免把也选中的子项误删）。
+export function collectReleaseIds(
+  items: Transaction[],
+  parentId: number,
+  excludeIds?: number[],
+): number[] {
+  const all = collectSubtreeIds(items, parentId);
+  if (!excludeIds || excludeIds.length === 0) return all;
+  const ex = new Set(excludeIds);
+  return all.filter((id) => !ex.has(id));
+}
+
+// A（1.1.3）：回收站「恢复」护栏——Project 子事务若其所属父事务不在 active（已删 / 已不再是
+// Project），单独恢复会变成「孤儿」（子事务只在 Project 视图渲染），应拦截，提示先恢复父事务。
+// 返回 true 表示允许单独恢复；false 表示需先恢复所属的 Project 父事务。
+export function canRestoreChild(t: Transaction, active: Transaction[]): boolean {
+  if (t.parent_id == null) return true; // 顶层事务，随意恢复
+  const parent = active.find((p) => p.id === t.parent_id);
+  // 父不存在 / 已软删 / 已不是 Project → 不允许单独恢复子项
+  return !!parent && parent.category === "project" && !parent.deleted;
+}

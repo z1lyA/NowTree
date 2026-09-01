@@ -7,6 +7,7 @@
 import { useTxStore } from "../store/useTxStore";
 import type { Category } from "../types/transaction";
 import { playClearSound } from "../utils/clearSound";
+import { showToast } from "../toast";
 
 export interface ListActionsConfig {
   selected: Set<number>;
@@ -28,7 +29,7 @@ export interface ListActionsConfig {
 }
 
 export function useListActions(cfg: ListActionsConfig) {
-  const { reorder, updateTx, loadTrash } = useTxStore();
+  const { reorder, updateTx, loadTrash, active, releaseDescendants } = useTxStore();
 
   // 排序：各视图保留自己的比较器（Project 完成度排序不同），只统一最后的 reorder 调用。
   function applySort(sortedIds: number[]) {
@@ -68,7 +69,9 @@ export function useListActions(cfg: ListActionsConfig) {
     cfg.setSelMode(false);
   }
 
-  // 移动到其它类别：先按 filterMovable 过滤（如 Project 跳过含子的父事务），再批量改类。
+  // 移动到其它类别：先按 filterMovable 过滤（如 Project 已不再拦截含子的父事务），
+  // 再批量改类。A(1.1.3)：含子父事务随移动离开 Project 时，整棵子树先释放进回收站
+  // （排除同样被选中的后代，使其随父一起改类别而非被删），仅当目标类别≠project 才释放。
   async function moveTo(target: Category) {
     const ids = [...cfg.selected];
     let movable = ids;
@@ -82,9 +85,21 @@ export function useListActions(cfg: ListActionsConfig) {
       if (cfg.onMoved) cfg.onMoved(blocked);
       return;
     }
+    // A（1.1.3）：含子父事务离开 Project → 先释放整棵子树（排除同样被选中的后代）
+    let releasedTotal = 0;
+    if (target !== "project") {
+      for (const id of movable) {
+        const hasKids = active.some((t) => t.parent_id === id);
+        if (hasKids) {
+          const released = await releaseDescendants(id, movable);
+          releasedTotal += released.length;
+        }
+      }
+    }
     for (const id of movable) {
       await updateTx(id, { category: target, clear_parent: true });
     }
+    if (releasedTotal > 0) showToast(`已释放 ${releasedTotal} 个子事务进入回收站`);
     cfg.setSelected(new Set());
     cfg.setSelMode(false);
     if (cfg.onMoved) cfg.onMoved(blocked);

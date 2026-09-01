@@ -12,6 +12,7 @@ import {
   exitDragVisuals,
   isBeyondThreshold,
 } from "./dragUtils";
+import { useTxStore } from "../store/useTxStore";
 
 // 基于 Pointer Events 的列表拖拽排序（不依赖 HTML5 原生 DnD，规避 WebView 里"禁止"光标）。
 // 0.1.9：去掉拖拽手柄，改为「长按整条」触发。
@@ -36,6 +37,8 @@ export interface DragOpts {
   disabledCats?: string[]; // 跨类别时这些导航项不高亮、不响应（默认包含 inbox）
   onDisabledPress?: () => void; // 0.1.19：本条 disabled 时长按给出的提示（如「已完成无法拖拽」）
   excludeParentId?: number; // 0.1.19：改父时排除「自己的原父」（不能把子事务拖回它本来所在的父）
+  // 1.1.3：拖到垃圾桶悬浮窗（[data-trash]）即删除；优先级高于跨类别/改父/排序，故最早判定。
+  onTrash?: (id: number) => void;
 }
 
 export function useListDrag() {
@@ -203,6 +206,8 @@ export function useListDrag() {
         setDragPos({ x: startX, y: startY });
         rafId = requestAnimationFrame(autoScrollTick);
         enterDragVisuals();
+        // 1.1.3：标记拖拽开始 → 垃圾桶悬浮窗显形
+        useTxStore.getState().setDragUI({ active: true });
       };
 
       const move = (ev: PointerEvent) => {
@@ -218,6 +223,21 @@ export function useListDrag() {
         }
         setDragPos({ x: ev.clientX, y: ev.clientY });
         const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+
+        // 1.1.3：拖到垃圾桶悬浮窗 = 最高优先级删除落点（高于跨类别/改父/排序）。
+        // 命中即点亮垃圾桶、清空其它落点高亮，并 return（不再做行级/类别指示）。
+        if (opts?.onTrash) {
+          const trashEl = under?.closest("[data-trash]") as HTMLElement | null;
+          if (trashEl) {
+            useTxStore.getState().setDragUI({ onTrash: true });
+            clearHover();
+            setOverIdx(null);
+            setOverHalf(null);
+            return;
+          }
+          // 离开垃圾桶：复位高亮（值不变不触发重渲染）
+          useTxStore.getState().setDragUI({ onTrash: false });
+        }
 
         // 跨类别：左侧导航栏（data-cat）作为落点，高亮它并清空行级指示
         if (opts?.allowCrossCat) {
@@ -267,6 +287,17 @@ export function useListDrag() {
         if (started) {
           const did = ref.current.dragId;
           if (did != null) {
+            // 1.1.3：松手在垃圾桶 = 删除（最高优先级，早于跨类别/改父/排序）
+            if (opts?.onTrash) {
+              const trashEl = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest(
+                "[data-trash]",
+              ) as HTMLElement | null;
+              if (trashEl) {
+                opts.onTrash(did);
+                cleanup();
+                return;
+              }
+            }
             // 跨类别优先：松手在导航栏 → 改类别（禁用的项不响应）
             if (opts?.allowCrossCat) {
               const catEl = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest(
@@ -349,6 +380,8 @@ export function useListDrag() {
         setOverHalf(null);
         setDragPos(null);
         exitDragVisuals();
+        // 1.1.3：复位拖拽 UI 态 → 垃圾桶悬浮窗隐藏
+        useTxStore.getState().setDragUI({ active: false, onTrash: false });
       }
 
       timer = window.setTimeout(begin, LONG_PRESS_MS);

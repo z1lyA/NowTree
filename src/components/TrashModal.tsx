@@ -5,13 +5,15 @@ import { useEffect, useState } from "react";
 import Modal from "./common/Modal";
 import { useTxStore } from "../store/useTxStore";
 import { CATEGORY_LABELS, STATUS_LABELS } from "../types/transaction";
+import { canRestoreChild } from "../services/transactionService";
+import { showToast } from "../toast";
 
 interface TrashModalProps {
   onClose: () => void;
 }
 
 export default function TrashModal({ onClose }: TrashModalProps) {
-  const { trash, loadTrash, restoreTx, purgeTx, emptyTrash } = useTxStore();
+  const { trash, loadTrash, restoreTx, purgeTx, emptyTrash, active } = useTxStore();
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -22,6 +24,13 @@ export default function TrashModal({ onClose }: TrashModalProps) {
   async function onRestore(id: number) {
     try {
       setErr(null);
+      const t = trash.find((x) => x.id === id);
+      // A（1.1.3）：Project 子事务若所属父事务不在当前列表（已删 / 已不再是 Project），
+      // 单独恢复会变成孤儿（子事务只在 Project 视图渲染），先拦截。
+      if (t && !canRestoreChild(t, active)) {
+        showToast("子事务无法单独恢复：其所属的 Project 父事务不在当前列表（可能已删除或已不再是 Project）");
+        return;
+      }
       await restoreTx(id);
     } catch (e) {
       setErr("恢复失败：" + ((e as any)?.message ?? String(e)));

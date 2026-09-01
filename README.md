@@ -43,6 +43,7 @@ NowTree 是 **local-first** 的：数据只存在你本机，不强制联网、�
 - **深浅主题**：深色 / 浅色 / 跟随系统，平滑切换。
 - **时段分界线自定义**：在「设置 → 时段分界线」里自定义 早 / 午 / 晚 的起点小时（仅小时粒度），改动立即生效；休息段自动跟随「早」起点。
 - **拖拽排序**：长按整条事务拖动重排；跨视图可拖到左侧导航栏改类别；Project 内可拖拽改父。
+- **拖拽到垃圾桶删除**：长按进入拖拽后，底部正中显形垃圾桶悬浮窗，把事务拖过去松手即删（Inbox 硬删不弹撤销，其余四类软删可撤销），五个视图通用。
 - **快捷键**：`1`–`5` 切换视图，`Enter` 快速新增 / 保存，`Esc` 关闭弹窗。
 
 ---
@@ -106,8 +107,8 @@ npm run tauri build
 输出位置：
 
 - 松散可执行文件：`src-tauri/target/release/NowTree.exe`（可直接双击运行，发给别人也能用）
-- Windows Installer 包：`src-tauri/target/release/bundle/msi/NowTree_1.1.0_x64_en-US.msi`
-- NSIS 安装包：`src-tauri/target/release/bundle/nsis/NowTree_1.1.0_x64-setup.exe`
+- Windows Installer 包：`src-tauri/target/release/bundle/msi/NowTree_1.1.3_x64_en-US.msi`
+- NSIS 安装包：`src-tauri/target/release/bundle/nsis/NowTree_1.1.3_x64-setup.exe`
 
 > 本机已安装 WiX Toolset v3.14.1 与 NSIS，因此 `build-release.bat` 会同时产出上述三种产物。若只想拿到可直接双击的 exe，取 `NowTree.exe` 即可。
 >
@@ -131,7 +132,7 @@ npm run tauri build
 | `1` / `2` / `3` / `4` / `5` | 切换 Inbox / Next Actions / Projects / Waiting for / Someday |
 | `Enter` | 非输入态下快速新增当前视图事务；弹窗内保存 |
 | `Esc` | 关闭当前弹窗 |
-| 长按拖拽（约 220ms） | 拖动事务排序 / 跨类别 / 改父 |
+| 长按拖拽（约 220ms） | 拖动事务排序 / 跨类别 / 改父；拖到屏幕底部垃圾桶即删除 |
 
 ---
 

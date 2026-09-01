@@ -4,6 +4,7 @@
 //  - useToastSubscription：订阅全局 toast 事件。
 import { useEffect } from "react";
 import { onToast } from "../toast";
+import type { ToastAction } from "./useToast";
 
 // 提醒扫描周期（毫秒）：每 30 秒检查一次到期且未弹过的提醒。
 export const REMINDER_SCAN_MS = 30000;
@@ -37,6 +38,9 @@ export function useDeadlineNormalize(normalize: () => void) {
   }, [normalize]);
 }
 
-export function useToastSubscription(showToast: (m: string) => void) {
+// 订阅全局 toast 事件；showToast 需透传 action（如撤销按钮）到本地渲染。
+export function useToastSubscription(
+  showToast: (m: string, action?: ToastAction) => void,
+) {
   useEffect(() => onToast(showToast), [showToast]);
 }

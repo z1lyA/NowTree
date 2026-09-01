@@ -17,8 +17,8 @@ export function useToast() {
     setToast(msg);
     setToastAction(action ?? null);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    // 带动作时给更长停留（6s）方便点击；无动作 1.6s 自动消失。
-    const delay = action ? 6000 : 1600;
+    // 停留时长统一在 2-3s：带动作时给 3s 方便点击「撤销」；无动作 2s 自动消失。
+    const delay = action ? 3000 : 2000;
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
       setToastAction(null);

@@ -3,7 +3,7 @@
 // 右栏：早 / 午 / 晚 三个时段栏，把左栏事务长按拖入即分配时段（time_slot），
 //   拖回左栏则取消分配。分配的时段持久化到本地库，影响「启动弹窗」的今日任务。
 // 工具栏（一键清理 / 排序 / 多选）复用 CategoryListView 的同款逻辑，作用于全部 Next 事务。
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useTxStore } from "../store/useTxStore";
 import type { Transaction, TimeSlot } from "../types/transaction";
 import {
@@ -35,6 +35,7 @@ import {
   exitDragVisuals,
   isBeyondThreshold,
 } from "../hooks/dragUtils";
+import { collectSubtreeIds } from "../services/transactionService";
 
 const SLOTS: TimeSlot[] = ["morning", "noon", "evening"];
 
@@ -48,7 +49,7 @@ export default function NextView({
   openSlot: TimeSlot | null;
   setOpenSlot: (s: TimeSlot | null) => void;
 }) {
-  const { active, loadActive, updateTx, toggleComplete, deleteTx, reorder } = useTxStore();
+  const { active, loadActive, updateTx, toggleComplete, deleteTx, reorder, restoreMany } = useTxStore();
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [adding, setAdding] = useState(false);
   const { expandedNoteId, setExpandedNoteId, containerRef } = useNoteExpand();
@@ -163,6 +164,16 @@ export default function NextView({
     toggleSelMode();
     setClearConfirm(false);
   }
+
+  // 1.1.3：拖到垃圾桶删除。Next 永非 Inbox，故走软删（deleteTx 级联整棵子树）+ 撤销 toast。
+  const handleTrash = useCallback(
+    (id: number) => {
+      const sub = collectSubtreeIds(active, id);
+      deleteTx(id);
+      showToast("已删除", { label: "撤销", onClick: () => restoreMany([id, ...sub]) });
+    },
+    [active, deleteTx, restoreMany],
+  );
 
   // 1.1.2：Next 行内不再放「展示在 Next」开关——该开关已移到「编辑」弹窗内（与 Waiting/Someday 同款）。
   // 行内只保留「编辑」入口，展示开关 / 改日期等管理动作统一在编辑窗口完成。
@@ -318,6 +329,8 @@ export default function NextView({
       setDragPos({ x: lastMove.x, y: lastMove.y });
       rafId = requestAnimationFrame(autoScrollTick);
       enterDragVisuals();
+      // 1.1.3：标记拖拽开始 → 垃圾桶悬浮窗显形
+      useTxStore.getState().setDragUI({ active: true });
     };
     const move = (ev: PointerEvent) => {
       lastMove.ev = ev;
@@ -331,8 +344,26 @@ export default function NextView({
         return;
       }
       setDragPos({ x: ev.clientX, y: ev.clientY });
-      // 跨类别：若悬停在左侧分类导航栏（带 data-cat 的 nav-item），高亮它并清空时段指示
+      // 1.1.3：拖到垃圾桶悬浮窗 = 最高优先级删除落点（早于跨类别/改时段）。
+      // 命中即点亮垃圾桶、清空其它落点，并 return。
       const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const trashEl = under?.closest("[data-trash]") as HTMLElement | null;
+      if (trashEl) {
+        useTxStore.getState().setDragUI({ onTrash: true });
+        if (overCatEl) {
+          overCatEl.classList.remove("cat-drop-over");
+          overCatEl = null;
+        }
+        overSlotRef.current = null;
+        setOverSlot(null);
+        overIdxRef.current = null;
+        overHalfRef.current = null;
+        setOverIdx(null);
+        setOverHalf(null);
+        return;
+      }
+      useTxStore.getState().setDragUI({ onTrash: false });
+      // 跨类别：若悬停在左侧分类导航栏（带 data-cat 的 nav-item），高亮它并清空时段指示
       const catEl = under?.closest("[data-cat]") as HTMLElement | null;
       // 0.1.19：仅「原生 next_action（category=next_action 且 parent_id=null）」可在 Next 改类别；
       //   其余在 Next 展示的外来项（project 子项 / waiting / someday 凭 show_in_next 展示）一律不可改类别。
@@ -414,6 +445,13 @@ export default function NextView({
         justDraggedRef.current = true;
         const did = slotDragRef.current.id;
         const upUnder = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        // 1.1.3：松手在垃圾桶 = 删除（最高优先级，早于跨类别/改时段）
+        if (upUnder?.closest("[data-trash]")) {
+          ev.preventDefault();
+          handleTrash(did);
+          cleanup();
+          return;
+        }
         const catEl = upUnder?.closest("[data-cat]") as HTMLElement | null;
         if (catEl) {
           ev.preventDefault();
@@ -528,6 +566,8 @@ export default function NextView({
       setOverHalf(null);
       setDragPos(null);
       exitDragVisuals();
+      // 1.1.3：复位拖拽 UI 态 → 垃圾桶悬浮窗隐藏
+      useTxStore.getState().setDragUI({ active: false, onTrash: false });
     };
 
     timer = window.setTimeout(begin, LONG_PRESS_MS);
@@ -706,6 +746,7 @@ export default function NextView({
         <EditModal
           tx={editing}
           onClose={() => setEditing(null)}
+          fromNext={true}
           hideCategory={!(editing.category === "next_action" && editing.parent_id === null)}
         />
       )}
