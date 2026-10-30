@@ -58,18 +58,40 @@ describe("normalizeDeadline", () => {
     const r = normalizeDeadline("week", null);
     expect(r.type).toBe("week");
   });
-  it("1.1.1：明天——锚点日=今天时归一成今日", () => {
+  it("1.1.1：明天——锚点日=今天时归一成今日（保留锚点）", () => {
     const today = new Date();
     const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     const r = normalizeDeadline("tomorrow", d, today);
     expect(r.type).toBe("today");
-    expect(r.date).toBeNull();
+    expect(r.date).toBe(d); // 1.1.4：翻转后保留原定日作为锚点，供逾期判定/显示
   });
-  it("1.1.1：下周——锚点日=本周周日时归一成本周", () => {
+  it("1.1.1：下周——锚点日=本周周日时归一成本周（保留锚点）", () => {
     const base = new Date(2026, 7, 19, 10, 0, 0); // 2026-08-19 周三，本周周日=2026-08-23
     const r = normalizeDeadline("next_week", "2026-08-23", base);
     expect(r.type).toBe("week");
-    expect(r.date).toBeNull();
+    expect(r.date).toBe("2026-08-23"); // 1.1.4：保留锚点
+  });
+
+  // 1.1.4 回归：修复「明天/下周跨天未启动 → 锚点被改写成未来日」的 bug。
+  // 根因：旧翻转条件要求锚点日 == 今天（必须当天打开），否则触发 resolveDeadline 按"今天+1"重算成未来日，
+  // 静默抹掉逾期信号。现放宽为 <=，且翻转时保留原定日。
+  it("1.1.4：明天——锚点日已过期仍未启动，翻今日并保留原定日", () => {
+    const base = new Date(2026, 7, 19, 10, 0, 0); // 2026-08-19
+    const r = normalizeDeadline("tomorrow", "2026-08-18", base); // 锚点=昨天（已过期）
+    expect(r.type).toBe("today");
+    expect(r.date).toBe("2026-08-18"); // 保留原定日，使 isDeadlineOverdue 能判逾期
+  });
+  it("1.1.4：下周——锚点日已过期（旧周周日），翻本周并保留锚点", () => {
+    const base = new Date(2026, 7, 26, 10, 0, 0); // 2026-08-26 周三，本周周日=2026-08-23
+    const r = normalizeDeadline("next_week", "2026-08-16", base); // 锚点=更早一周的周日，已过期
+    expect(r.type).toBe("week");
+    expect(r.date).toBe("2026-08-16"); // 保留锚点，逾期判定据此生效
+  });
+  it("1.1.4：明天——锚点日在未来（尚未到），不翻转、保留原样", () => {
+    const base = new Date(2026, 7, 17, 10, 0, 0); // 2026-08-17
+    const r = normalizeDeadline("tomorrow", "2026-08-18", base); // 明天=次日，未到
+    expect(r.type).toBe("tomorrow");
+    expect(r.date).toBe("2026-08-18");
   });
 });
 

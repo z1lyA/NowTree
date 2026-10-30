@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { transactionRepo } from "../data";
 import type { Transaction, Status, Category, TxFields } from "../types/transaction";
-import { normalizeDeadline, resolveDeadline } from "../types/transaction";
+import { normalizeDeadline } from "../types/transaction";
 import type { ConvertInput } from "../data/repository";
 import { collectSubtreeIds, collectReleaseIds } from "../services/transactionService";
 import { notify } from "../services/notification";
@@ -335,9 +335,10 @@ export const useTxStore = create<TxStore>((set, get) => ({
     await Promise.all([get().loadActive(), get().loadInbox(), get().loadTrash()]);
   },
 
-  // 0.1.18 + 1.0.2：启动或跨天时，把需归一的相对/具体截止日翻成"今日/本周"，
-  // 并借 resolveDeadline 把锚点日期写入 deadline_date（而非清空），避免失去锚点。
+  // 0.1.18 + 1.0.2：启动或跨天时，把需归一的相对/具体截止日翻成"今日/本周"。
+  // 锚点日期（deadline_date）在新增/编辑时已通过 resolveDeadline 写入，这里只负责跨天翻转类型。
   // 1.1.1：范围由仅 date 扩为也含 tomorrow / next_week（二者同样解出确定锚点日，跨天翻成 today/week）。
+  // 1.1.4 修复：翻转时直接采用 normalizeDeadline 结果写库，不再经 resolveDeadline 重算，避免覆盖锚点。
   normalizeDeadlines: async () => {
     const today = new Date();
     const jobs: Promise<void>[] = [];
@@ -348,10 +349,12 @@ export const useTxStore = create<TxStore>((set, get) => ({
           t.deadline_type === "next_week") &&
         t.deadline_date
       ) {
-        const norm = normalizeDeadline(t.deadline_type, t.deadline_date, today);
-        const dl = resolveDeadline(norm.type, norm.date, today);
-        if (dl.type !== t.deadline_type || dl.date !== t.deadline_date) {
-          jobs.push(get().updateTx(t.id, { deadline_type: dl.type, deadline_date: dl.date }));
+        // 1.1.4 修复：直接采用 normalizeDeadline 的结果写库，不再经 resolveDeadline 重算。
+      // 此前先 normalize 再 resolve 会把 tomorrow/next_week 的锚点按"今天+1/下周"重新解出未来日，
+      // 覆盖掉已翻成 today/week 的锚点，静默抹掉逾期信号。
+      const norm = normalizeDeadline(t.deadline_type, t.deadline_date, today);
+        if (norm.type !== t.deadline_type || norm.date !== t.deadline_date) {
+          jobs.push(get().updateTx(t.id, { deadline_type: norm.type, deadline_date: norm.date }));
         }
       }
     }

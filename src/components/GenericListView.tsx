@@ -184,7 +184,8 @@ export default function GenericListView({ mode }: GenericListViewProps) {
   // 0.1.17：跨类别拖拽落点——拖到左侧导航栏改类别（在此命名为 changeCategoryOnDrop 以表意）。
   // 规则：inbox 禁止互转（拖到 Inbox 导航不高亮、无操作）；拖到自己所在类别的导航 = 无操作；
   //       原生 next_action 项离开 Next：清 parent_id / time_slot / show_in_next；
-  //       someday / waiting 项改类别：仅改 category，**保持 show_in_next 与 time_slot（不影响 Next 展示状态）**。
+  //       改成顶层 Project：清 show_in_next / time_slot（父 Project 不作为 Next 项）；
+  //       someday / waiting 互转：仅改 category，**保持 show_in_next 与 time_slot（不影响 Next 展示状态）**。
   // 类别迁移规则收口到 service（见 buildCategoryPatch）：inbox 互转 / 拖到自己类别
   // 由上面早返回拦截；这里只负责「原生 next_action 离开 Next 清父子关系」等补丁。
   function changeCategoryOnDrop(id: number, cat: string) {

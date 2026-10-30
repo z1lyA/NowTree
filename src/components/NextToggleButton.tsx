@@ -1,5 +1,6 @@
 import { useTxStore } from "../store/useTxStore";
 import type { Transaction } from "../types/transaction";
+import { nextTogglePatch } from "../services/transactionService";
 
 // 复用于 GenericListView(Waiting/Someday) / ProjectListView(子项) / NextView(外来项)：
 // 切换「是否展示在 Next」(show_in_next)。标签随状态切换（在 Next ✓ / 加入 Next），
@@ -24,7 +25,7 @@ export default function NextToggleButton({
       className={`btn-ghost ${showInNext ? "on" : ""}`}
       onClick={() => {
         onBeforeToggle?.();
-        updateTx(t.id, { show_in_next: !showInNext });
+        updateTx(t.id, nextTogglePatch(!showInNext));
       }}
     >
       {showInNext ? "在 Next ✓" : "加入 Next"}

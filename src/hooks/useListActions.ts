@@ -6,6 +6,7 @@
 // 差异点由各视图以回调注入，既消除重复又保留各自语义。
 import { useTxStore } from "../store/useTxStore";
 import type { Category } from "../types/transaction";
+import { buildCategoryPatch } from "../services/transactionService";
 import { playClearSound } from "../utils/clearSound";
 import { showToast } from "../toast";
 
@@ -97,7 +98,10 @@ export function useListActions(cfg: ListActionsConfig) {
       }
     }
     for (const id of movable) {
-      await updateTx(id, { category: target, clear_parent: true });
+      // 1.1.4：与拖拽 / 编辑弹窗共用同一套类别迁移规则——改成顶层 Project 时一并清
+      // show_in_next + time_slot（父 Project 不作为 Next 项）。
+      const t = active.find((x) => x.id === id);
+      await updateTx(id, t ? buildCategoryPatch(t, target) : { category: target, clear_parent: true });
     }
     if (releasedTotal > 0) showToast(`已释放 ${releasedTotal} 个子事务进入回收站`);
     cfg.setSelected(new Set());

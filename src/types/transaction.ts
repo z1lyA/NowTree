@@ -53,14 +53,18 @@ export function normalizeDeadline(
   date: string | null,
   base: Date = new Date(),
 ): { type: DeadlineType; date: string | null } {
-  // 明天：锚点日 == 今天 → 翻成「今日」（今天选明天，明天打开自动变今日）
+  // 明天：锚点日 <= 今天 → 翻成「今日」。
+  // 1.1.4 修复：条件由 == 放宽为 <=，使「过了锚点日仍未启动」也能翻成今日
+  // （此前要求必须"当天打开"才翻，跨天未启动会触发 resolveDeadline 把锚点改写成未来日，
+  // 静默抹掉逾期信号）；翻转时保留原 date 作为锚点，供逾期判定与显示使用。
   if (type === "tomorrow") {
-    if (date && date === fmtDate(base)) return { type: "today", date: null };
+    if (date && date <= fmtDate(base)) return { type: "today", date };
     return { type, date };
   }
-  // 下周：锚点日 == 本周周日 → 翻成「本周」（本周选下周，跨过周日 24:00 打开自动变本周）
+  // 下周：锚点日 <= 本周周日 → 翻成「本周」（跨过周日 24:00 仍可在后续任意一天翻本周）。
+  // 1.1.4 修复：同上，条件放宽 + 保留锚点 date。
   if (type === "next_week") {
-    if (date && date === fmtDate(weekRange(base).sun)) return { type: "week", date: null };
+    if (date && date <= fmtDate(weekRange(base).sun)) return { type: "week", date };
     return { type, date };
   }
   if (type !== "date" || !date) return { type, date };

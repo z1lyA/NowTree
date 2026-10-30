@@ -4,6 +4,47 @@
 
 ---
 
+## 1.1.4（2026-10-30）
+
+本次为**两处纯前端修复 + 一处新功能 + 一处交互优化**：① 截止日锚点被静默改写的回归 bug（设置了「明天 / 下周」的事务，若跨过锚点日仍未启动，再次打开 App 时其原定日会被改写成未来日，逾期信号被悄悄抹掉）；② 取消展示在 Next 后残留时段槽；③ 编辑弹窗把事务改为 Project 时可直接选择父事务；④ 编辑保存统一提示「修改已保存」。纯前端改动，零 Rust 改动、零数据库迁移。
+
+### 修复：截止日锚点被静默改写成未来日（明天 / 下周）
+- **问题（1.1.1 引入）**：启动归一时 `normalizeDeadlines` 先 `normalizeDeadline` 翻转类型，再经 `resolveDeadline` 重算——而 `resolveDeadline` 对 `tomorrow` / `next_week` **忽略已存锚点、永远按"今天+1 / 下周周日"重新解出未来日**。结果：
+  - 若你 17 号设「明天（18）」、18 号没开 App、19 号才打开，归一会把它翻成 `today` 又立刻被 `resolveDeadline` 改写成「明天=20」，锚点从 18 跳成 20，逾期信号被抹掉（顺延一次、永远追不上）。
+  - 翻转条件 `date === 今天` 过严：要求必须"当天打开"才翻，一旦跨天未启动就走重算路径，正是上面改写出错的入口。
+- **现在**：① `normalizeDeadline` 的翻转条件由 `===` 放宽为 `<=`，**过期未启动也能翻成「今日 / 本周」**；翻转时**保留原定日**作为锚点（不再清空），供逾期判定与显示使用。② `normalizeDeadlines` 去掉 `resolveDeadline` 重算，**直接采用归一结果写库**，不再覆盖锚点。
+- **不受影响**：`today / week / month` 本就稳定、不参与重算；已完成的「完成后时间要求显示今日」老逻辑（用户决定维持原样）完全未触碰。
+- **直观效果**：17 设「明天(18)」、18 没开、19 开 → 翻成「今日」且锚点仍记为 `2026-xx-18`，`isDeadlineOverdue` 据此正确判为逾期并显徽标。
+
+### 修复：取消展示在 Next 后残留时段槽
+- **问题**：外来项（Waiting / Someday / Project 子项）在 Next 视图里被拖到某个时段（如「中午」）后，若点「取消展示」再于未来的某天重新「加入 Next」，会**直接落回原来的「中午」栏**，而非预期的「未分配时段」区。根因：`NextToggleButton`（三处共用的唯一开关）取消时只翻 `show_in_next`，没清 `time_slot`；而 `time_slot` 全代码仅 Next 视图写入、仅 Next 与启动弹窗（且仅对 `show_in_next` 项）读取，取消路径漏清就遗留了旧槽。
+- **现在**：抽纯函数 `nextTogglePatch(willShow)` 收口规则（与 `buildCategoryPatch` 同处），**取消展示(`willShow=false`)时一并 `time_slot:"none"`**；加入展示时只翻旗子、不动时段。改一处覆盖三处共用开关，零其它路径误伤。
+- **不受影响**：原生 Next Action 顶层项本就无此开关（永远在 Next），时段不受影响；改类别离开 Next（`buildCategoryPatch` / NextView）等既有清时段路径不变。
+- **直观效果**：拖到「中午」→ 取消 → 再「加入 Next」→ 回到「未分配时段」区，下次由你重新分配。
+
+### 新功能：编辑弹窗把事务改为 Project 时可选父事务
+- **位置**：编辑弹窗「类型」分段按钮正下方（`TransactionForm` 的 `parentSelect` 插槽），仅当类型选中 `Project` 时出现，默认「无」。
+- **交互**：默认「无」= 独立 Project；选某个现有 Project 则本事务保存后成为它的子事务，等价于「从其他类型一步挂进某个项目」（以前只能先进 Project 再加子项）。
+- **落库**：与 Project 内「新增子事项」一致，写 `category="next_action" + parent_id=父id`（NowTree 的子事务本就不是 `category="project"`）。`show_in_next` 一律保留原值。
+- **顺序与时段**：挂父后 `order_index` 追加到目标父末尾，不打乱既有子事务顺序；若该条挂父后不再出现在 Next，同步清空 `time_slot`（与上一节取消展示清时段同口径）。
+- **父 Project 不进 Next**：任何类别改成「顶层 Project」（编辑弹窗改类型 / 拖到 Projects 导航 / 批量移动到 Project）都会一并清掉 `show_in_next` 与 `time_slot`——父 Project 不作为 Next 项，避免 Waiting / Someday 凭 `show_in_next` 透出的项改成 Project 后仍赖在 Next 里。规则收口在 `buildCategoryPatch`，编辑、拖拽、批量移动三个入口共用，类别未变时不产补丁（不会误清）。
+- **护栏**：① 被编辑项自身若还有子事务，拒绝挂父并提示「先处理子事务」（否则其子事务会变成任何视图都不渲染的孤儿）；② 候选只列未完成的顶层 Project，且排除自身；③ 所选父已失效（被删 / 改类别 / 已完成）时拒绝保存。
+- **注意**：从 Next 编辑一条顶层 Next Action 并挂到某 Project 后，它会因为「子事务不是顶层 next_action」而从 Next 消失——这是过滤规则的必然结果，`show_in_next` 未被改动。
+
+### 优化：编辑保存统一提示「修改已保存」
+- **规则**：编辑弹窗保存时逐字段比对（标题 / 备注 / 类型 / 优先级 / 时间要求 / 提醒 / 父事务），**只有确实改动过才弹**「修改已保存」；什么都没改直接保存则静默关闭。
+- **不参与比对**：时段槽、排序索引、提醒已弹标记等派生字段——它们是改动的连带结果，不单独触发提示。
+- **合并提示**：若同一次保存还触发了「父事务改类别释放子事务」，提示合并为「修改已保存，N 个子事务已移入回收站」（toast 单槽，分开发会互相覆盖）。
+
+### 工程
+- 修复点：`src/types/transaction.ts` 的 `normalizeDeadline`（翻转条件 + 锚点保留）；`src/store/useTxStore.ts` 的 `normalizeDeadlines`（去掉 `resolveDeadline` 重算，并移除该文件对 `resolveDeadline` 的不再使用导入）；新增 `src/services/transactionService.ts` 的 `nextTogglePatch`，并在 `src/components/NextToggleButton.tsx` 取消展示时调用（清 `time_slot`）。
+- 新增点：`src/services/transactionService.ts` 的 `parentCandidates`（父事务候选过滤）/ `attachToParentPatch`（挂父补丁：落 `next_action` + `parent_id` + 末尾 `order_index` + 按需清时段槽）/ `txSnapshotOf` + `isSameSnapshot`（编辑改动检测）；`src/components/EditModal.tsx` 接入父事务下拉、挂父护栏与统一保存提示（零 `TransactionForm` 改动）。
+- 修复点：`buildCategoryPatch` 补「改成顶层 Project → 清 `show_in_next` + `time_slot`」并用「类别未变返回空补丁」防误清；`EditModal`（编辑改类型）与 `useListActions.moveTo`（批量移动）改为复用该函数，与拖拽路径统一。
+- 版本号四处（package.json / tauri.conf.json / Cargo.toml / App.tsx）升至 `1.1.4`。
+- 测试：`tsc --noEmit` 0 错；`vitest run` 77 项全部通过（本次新增 18 项：父事务候选 2 项 + 挂父补丁 2 项 + 保存改动检测 12 项 + 改 Project 清 Next 2 项）。
+
+---
+
 ## 1.1.3（2026-08-28）
 
 两处一致性修复：父事务改类别时释放子事务（子事务不再凭空消失），编辑弹窗的「展示在 Next」开关按来源收口（只在 Next 视图打开时出现）；并新增**拖拽到垃圾桶快捷删除**。零 Rust 改动、零数据库迁移。

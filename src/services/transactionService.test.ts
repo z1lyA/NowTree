@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildCategoryPatch, canShowInNext, sourceText, collectReleaseIds, canRestoreChild } from "./transactionService";
+import { buildCategoryPatch, canShowInNext, sourceText, collectReleaseIds, canRestoreChild, nextTogglePatch, parentCandidates, attachToParentPatch, txSnapshotOf, isSameSnapshot } from "./transactionService";
+import type { TxSnapshot } from "./transactionService";
 import type { Transaction } from "../types/transaction";
 
 function mk(p: Partial<Transaction>): Transaction {
@@ -45,6 +46,24 @@ describe("buildCategoryPatch", () => {
     const patch = buildCategoryPatch(tx, "waiting");
     expect(patch).toEqual({ category: "waiting" });
   });
+  it("waiting / someday 改成顶层 Project：清 show_in_next + time_slot", () => {
+    const w = mk({ category: "waiting", show_in_next: true, time_slot: "morning" });
+    expect(buildCategoryPatch(w, "project")).toEqual({
+      category: "project",
+      show_in_next: false,
+      time_slot: "none",
+    });
+    const s = mk({ category: "someday", show_in_next: true, time_slot: "noon" });
+    expect(buildCategoryPatch(s, "project")).toEqual({
+      category: "project",
+      show_in_next: false,
+      time_slot: "none",
+    });
+  });
+  it("类别未变：不产任何补丁（不误清 show_in_next / time_slot）", () => {
+    const tx = mk({ category: "next_action", time_slot: "morning", show_in_next: true });
+    expect(buildCategoryPatch(tx, "next_action")).toEqual({});
+  });
 });
 
 describe("canShowInNext", () => {
@@ -55,6 +74,15 @@ describe("canShowInNext", () => {
   it("next_action / project → false", () => {
     expect(canShowInNext("next_action")).toBe(false);
     expect(canShowInNext("project")).toBe(false);
+  });
+});
+
+describe("nextTogglePatch (1.1.4 取消展示清时段)", () => {
+  it("取消展示(show_in_next=false) → 同时清 time_slot", () => {
+    expect(nextTogglePatch(false)).toEqual({ show_in_next: false, time_slot: "none" });
+  });
+  it("加入展示(show_in_next=true) → 只翻旗子、不动时段", () => {
+    expect(nextTogglePatch(true)).toEqual({ show_in_next: true });
   });
 });
 
@@ -113,5 +141,78 @@ describe("canRestoreChild (A/1.1.3 回收站恢复护栏)", () => {
   });
   it("子事务的父根本不在 active（已彻底删除）→ 拦截", () => {
     expect(canRestoreChild(child, [])).toBe(false);
+  });
+});
+
+// ── 1.1.4 新增：编辑弹窗改 Project 可选父事务 ──────────────────────
+describe("parentCandidates (父事务候选)", () => {
+  const items = [
+    mk({ id: 1, category: "project", parent_id: null }),
+    mk({ id: 2, category: "project", parent_id: null, status: "completed" }),
+    mk({ id: 3, category: "project", parent_id: 1 }), // 子事务（异常态）→ 排除
+    mk({ id: 4, category: "waiting", parent_id: null }),
+    mk({ id: 5, category: "project", parent_id: null }),
+  ];
+  it("只保留顶层未完成的 Project", () => {
+    expect(parentCandidates(items).map((t) => t.id)).toEqual([1, 5]);
+  });
+  it("excludeId 排除自身", () => {
+    expect(parentCandidates(items, 1).map((t) => t.id)).toEqual([5]);
+  });
+});
+
+describe("attachToParentPatch (挂父补丁)", () => {
+  it("落 next_action + 写 parent_id + 追加到末尾 + 清时段槽", () => {
+    const siblings = [
+      mk({ id: 10, parent_id: 9, order_index: 2 }),
+      mk({ id: 11, parent_id: 9, order_index: 7 }),
+    ];
+    const tx = mk({ id: 1, category: "waiting", show_in_next: false, time_slot: "morning" });
+    expect(attachToParentPatch(tx, 9, siblings)).toEqual({
+      category: "next_action",
+      parent_id: 9,
+      order_index: 8,
+      time_slot: "none",
+    });
+  });
+  it("show_in_next=true 时保留时段槽；目标父下无子事务则 order_index 从 0 起", () => {
+    const tx = mk({ id: 1, category: "someday", show_in_next: true, time_slot: "noon" });
+    expect(attachToParentPatch(tx, 9, [])).toEqual({
+      category: "next_action",
+      parent_id: 9,
+      order_index: 0,
+    });
+  });
+});
+
+describe("isSameSnapshot (编辑保存改动检测)", () => {
+  const base: TxSnapshot = txSnapshotOf(
+    mk({ title: "a", note: "n", priority: 2, category: "waiting" }),
+  );
+  it("完全一致 → true", () => {
+    expect(isSameSnapshot(base, { ...base })).toBe(true);
+  });
+  it("note 空串 vs null → true（归一化后相同）", () => {
+    expect(isSameSnapshot({ ...base, note: "" }, { ...base, note: null })).toBe(true);
+  });
+  it("priority null vs 1 → true（老数据兼容）", () => {
+    expect(isSameSnapshot({ ...base, priority: null }, { ...base, priority: 1 })).toBe(true);
+  });
+  it("注意：priority null vs 2 → false（真实改动仍然识别）", () => {
+    expect(isSameSnapshot({ ...base, priority: null }, { ...base, priority: 2 })).toBe(false);
+  });
+
+  const mutations: Array<[string, Partial<TxSnapshot>]> = [
+    ["title", { title: "b" }],
+    ["note", { note: "x" }],
+    ["category", { category: "project" }],
+    ["priority", { priority: 5 }],
+    ["deadline_type", { deadline_type: "today" }],
+    ["deadline_date", { deadline_date: "2026-10-30" }],
+    ["reminder_time", { reminder_time: "2026-10-30T09:00" }],
+    ["parent_id", { parent_id: 7 }],
+  ];
+  it.each(mutations)("%s 改动 → false", (_key, patch) => {
+    expect(isSameSnapshot(base, { ...base, ...patch })).toBe(false);
   });
 });
