@@ -141,7 +141,9 @@ export default function NextView({
       ordered.filter((t) => t.status === "completed").map((t) => t.id),
     deleteSelected: async (ids) => { for (const id of ids) await deleteTx(id); },
   });
-  const { cleanCompleted, cancelClean, batchDelete, moveTo } = listActions;
+  const { cleanCompleted, cancelClean, batchDelete, moveTo, completedIds } = listActions;
+  // 1.1.5：确认清理态的行高亮跟随「实时已完成集合」；普通多选仍用 selected。
+  const completedIdSet = new Set(completedIds);
   function applySort(mode: "priority" | "time" | "completion") {
     const sorted = [...items].sort(
       mode === "priority" ? byPriority : mode === "completion" ? byCompletion : byTime,
@@ -596,12 +598,12 @@ export default function NextView({
       {/* 0.1.20：工具栏收敛为共享 ListToolbar */}
       <ListToolbar
         selMode={selMode}
-        selectedCount={selected.size}
+        selectedCount={clearConfirm ? completedIds.length : selected.size}
         confirmBatch={confirmBatch}
         setConfirmBatch={setConfirmBatch}
         onToggleSelMode={toggleSelModeLocal}
         cleanConfirm={clearConfirm}
-        cleanDisabled={!clearConfirm && ordered.filter((t) => t.status === "completed").length === 0}
+        cleanDisabled={completedIds.length === 0}
         onClean={cleanCompleted}
         onCancelClean={cancelClean}
         onSort={applySort}
@@ -627,7 +629,7 @@ export default function NextView({
                   (overIdx === t.id && dragId !== t.id
                     ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                     : "") +
-                  ((selMode || clearConfirm) && selected.has(t.id) ? " selected" : "")
+                  ((selMode && selected.has(t.id)) || (clearConfirm && completedIdSet.has(t.id)) ? " selected" : "")
                 }
                 rowProps={{
                   "data-drag-idx": t.id,
@@ -705,7 +707,7 @@ export default function NextView({
                   (overIdx === t.id && dragId !== t.id
                     ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                     : "") +
-                  ((selMode || clearConfirm) && selected.has(t.id) ? " selected" : "")
+                  ((selMode && selected.has(t.id)) || (clearConfirm && completedIdSet.has(t.id)) ? " selected" : "")
                 }
                 rowProps={{
                   "data-drag-idx": t.id,

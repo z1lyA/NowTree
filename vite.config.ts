@@ -17,5 +17,13 @@ export default defineConfig({
     target: "es2021",
     minify: "esbuild",
     sourcemap: false,
+    // 1.1.5：双入口——主窗口 index.html + 右下角提醒窗口 reminder.html。
+    // 相对路径即相对 Vite root（项目根），ESM 配置里不依赖 __dirname。
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        reminder: "reminder.html",
+      },
+    },
   },
 });

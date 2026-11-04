@@ -759,18 +759,87 @@ body.dragging-active .dropdown-menu {
 }
 .tx-caret:hover { background: rgba(127,127,127,.18); color: var(--text); }
 
-/* ===== 0.1.16：启动弹窗「今天」 ===== */
-.startup-date { font-size: 16px; margin: 4px 0 6px; }
-.startup-sub { margin: 0 0 14px; }
-.startup-slots { display: flex; gap: 12px; }
-.startup-slot {
-  flex: 1; min-height: 90px;
-  background: rgba(0,0,0,.14); border: 1px solid var(--border);
-  border-radius: 10px; padding: 10px 12px;
+/* ===== 1.1.5：Inbox 每周回顾设置（周一到周日选择） ===== */
+.review-weekday-label { font-size: 13px; color: var(--text); margin: 14px 0 8px; }
+.weekday-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.weekday-btn {
+  padding: 5px 10px; font-size: 13px; border-radius: 8px; cursor: pointer;
+  background: var(--bg-input); color: var(--text-muted);
+  border: 1px solid var(--border);
 }
-.startup-slot-head { font-weight: 600; font-size: 14px; margin-bottom: 8px; color: var(--text); }
-.startup-empty { font-size: 12px; }
-.startup-task-list { margin: 0; padding-left: 18px; font-size: 14px; }
-.startup-task-list li { margin: 3px 0; }
-.startup-quote { font-style: italic; color: var(--text-muted); margin: 0 0 10px; font-size: 14px; opacity: .9; }
-.startup-rest { font-size: 16px; margin: 12px 0; color: var(--text); }
+.weekday-btn:hover { color: var(--text); border-color: var(--accent); }
+.weekday-btn.active {
+  background: rgba(76, 175, 130, .18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent); color: var(--text); font-weight: 600;
+}
+.review-hint { font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
+
+/* ===== 1.1.5：弹窗个性化（位置四角 / 宽度 / 稍后时长） ===== */
+.corner-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.corner-btn {
+  position: relative;
+  padding: 14px 10px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.corner-btn:hover { color: var(--text); border-color: var(--accent); }
+.corner-btn.active {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  background: rgba(76, 175, 130, .14);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+/* 小方框里的小圆点表示弹窗会贴在哪个角落 */
+.corner-btn::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  width: 22px;
+  height: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  opacity: .9;
+}
+.corner-dot {
+  position: absolute;
+  left: 13px;
+  top: 11px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.corner-dot--top-right { left: 24px; }
+.corner-dot--bottom-left { top: 17px; }
+.corner-dot--bottom-right { left: 24px; top: 17px; }
+
+.seg-group { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.seg-btn:hover { color: var(--text); border-color: var(--accent); }
+.seg-btn.active {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  background: rgba(76, 175, 130, .16);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+

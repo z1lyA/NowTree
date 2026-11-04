@@ -1,6 +1,6 @@
 [package]
 name = "nowtree"
-version = "1.1.4"
+version = "1.1.5"
 description = "NowTree - 个人事务管理系统"
 edition = "2021"
 
@@ -10,7 +10,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
-tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
@@ -19,6 +18,11 @@ serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] } # 0.1.19：sync_id 生成
+
+# 1.1.5：提醒窗口需要「显示但不抢焦点」——直接用 Win32 ShowWindow(SW_SHOWNOACTIVATE)，
+# 因为 tao 的 Window::show() 在首次显示之后会走 SW_SHOW（可能激活窗口）。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
 
 [profile.release]
 panic = "abort"

@@ -1,0 +1,272 @@
+/* 1.1.5：右下角提醒窗口样式（仅 reminder.html 使用；主窗口不加载）。
+ * 窗口本身 transparent + 无边框，因此 html/body 必须透明，只让卡片有底色。
+ * 颜色全部走 index.css 的主题变量，跟随深/浅色主题。 */
+
+html,
+body.reminder-body {
+  background: transparent !important;
+  margin: 0;
+  overflow: hidden;
+}
+
+.reminder-root {
+  /* 上下 8px 内边距：给卡片阴影与滑入动画留空间（Rust 侧按内容高校准窗口高度） */
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  user-select: none;
+  /* 1.1.5：悬停时是普通光标；按住卡片空白处才进入「抓取」并拖动窗口。 */
+  cursor: default;
+}
+/* 只有按住（点击并保持）时才显示抓取手势，松开即恢复普通光标 */
+.reminder-root:active {
+  cursor: grabbing;
+}
+
+/* ===== 多卡折叠条：N 条提醒 / 展开收起 / 全部关闭 ===== */
+.rcard-stackbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 4px 2px;
+}
+
+.rcard-stackbar-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rcard-stackbar-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.rcard-stackbar-btn:hover {
+  background: var(--bg-input);
+  color: var(--text);
+}
+.rcard-stackbar-danger:hover {
+  color: var(--danger);
+}
+
+/* ===== 卡片（C 方案：强调色头部） ===== */
+.rcard-stackwrap {
+  position: relative;
+}
+
+/* 折叠时画在卡片背后的「景深」堆叠：每层更窄、更暗、带阴影，像一叠卡片往后收 */
+.rcard-layers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+.rcard-layer {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 52px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-elev) 94%, var(--bg)),
+    color-mix(in srgb, var(--bg-elev) 64%, var(--bg))
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 -4px 12px rgba(0, 0, 0, 0.32);
+}
+.rcard-stackwrap > .rcard {
+  position: relative;
+  z-index: 10;
+}
+
+.rcard {
+  --rcard-accent: var(--accent);
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  animation: rcard-in 0.18s ease-out;
+  overflow: hidden;
+}
+.rcard--review {
+  --rcard-accent: #c08a2e;
+}
+.rcard--daily {
+  --rcard-accent: #4f8fc6;
+}
+
+@keyframes rcard-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 强调色头部：分类 + 标题（每日摘要卡头部只有问候） */
+.rcard-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 13px 10px;
+  background: linear-gradient(
+    135deg,
+    var(--rcard-accent),
+    color-mix(in srgb, var(--rcard-accent) 55%, #111)
+  );
+  color: #f4fff9;
+}
+
+.rcard-headtext {
+  min-width: 0;
+  flex: 1;
+}
+
+.rcard-kind {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.82);
+  letter-spacing: 0.4px;
+}
+
+.rcard-title {
+  margin: 1px 0 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #ffffff;
+  word-break: break-word;
+}
+.rcard--daily .rcard-title {
+  font-size: 16.5px;
+}
+
+.rcard-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  line-height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 17px;
+  cursor: pointer;
+}
+.rcard-close:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.rcard-body {
+  padding: 10px 13px 9px;
+}
+
+.rcard-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rcard-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* ===== 每日摘要 ===== */
+.rcard-date {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.rcard-quote {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rcard-sub {
+  margin: 9px 0 4px;
+  font-size: 12px;
+}
+
+.rcard-tasks {
+  margin: 0;
+  padding-left: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.rcard-task {
+  margin: 2px 0;
+  word-break: break-word;
+}
+
+.rcard-empty,
+.rcard-rest {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+/* ===== 动作区 ===== */
+.rcard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.rcard-actions .btn-primary,
+.rcard-actions .btn-ghost {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* 主按钮跟随卡片头部的强调色（事务=绿 / 回顾=琥珀 / 摘要=蓝），
+ * 让「完成 / 去整理 / 开始今天」与头部是一套配色；次级按钮 hover 也走同色。 */
+.rcard-actions .btn-primary {
+  background: var(--rcard-accent);
+  border-color: var(--rcard-accent);
+  color: #08130d;
+  font-weight: 600;
+}
+.rcard-actions .btn-primary:hover {
+  background: color-mix(in srgb, var(--rcard-accent) 82%, #ffffff);
+  border-color: color-mix(in srgb, var(--rcard-accent) 82%, #ffffff);
+}
+
+.rcard-actions .btn-ghost:hover {
+  color: var(--rcard-accent);
+  border-color: var(--rcard-accent);
+}

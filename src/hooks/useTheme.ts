@@ -13,6 +13,13 @@ function applyTheme(mode: ThemeMode) {
   root.dataset.theme = eff;
 }
 
+// 1.1.5：按 localStorage 的当前设置重新套用主题。
+// 供「常驻但可能被隐藏」的提醒窗口在重新显示时同步主窗口刚改过的主题（弹窗单独一个窗口，不会随主窗口重渲染）。
+export function applyStoredTheme() {
+  const mode = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
+  applyTheme(mode);
+}
+
 export function useTheme() {
   const [theme, setTheme] = useState<ThemeMode>(
     () => (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system",

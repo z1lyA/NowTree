@@ -190,7 +190,9 @@ export default function ProjectListView() {
       return { movable: ids, blocked: [] };
     },
   });
-  const { cleanCompleted, cancelClean, batchDelete, moveTo } = listActions;
+  const { cleanCompleted, cancelClean, batchDelete, moveTo, completedIds } = listActions;
+  // 1.1.5：确认清理态的父/子行高亮跟随「实时已完成集合」；普通多选仍用 selected。
+  const completedIdSet = new Set(completedIds);
 
   // 0.1.19：子事务跨类别拖拽落点——拖到左侧导航栏改类别。
   // 规则：inbox 禁止互转（拖到 Inbox 导航不高亮、无操作）；
@@ -265,16 +267,12 @@ export default function ProjectListView() {
 
       <ListToolbar
         selMode={selMode}
-        selectedCount={selected.size}
+        selectedCount={clearConfirm ? completedIds.length : selected.size}
         confirmBatch={confirmBatch}
         setConfirmBatch={setConfirmBatch}
         onToggleSelMode={toggleSelModeLocal}
         cleanConfirm={clearConfirm}
-        cleanDisabled={
-          !clearConfirm &&
-          projectsOrdered.filter((p) => p.status === "completed").length === 0 &&
-          projectsOrdered.every((p) => childrenOf(p.id).filter((c) => c.status === "completed").length === 0)
-        }
+        cleanDisabled={completedIds.length === 0}
         onClean={cleanCompleted}
         onCancelClean={cancelClean}
         onSort={applySort}
@@ -321,7 +319,7 @@ export default function ProjectListView() {
                 (overIdx === p.id && dragId !== p.id
                   ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                   : "") +
-                ((selMode || clearConfirm) && selected.has(p.id) ? " selected" : "")
+                ((selMode && selected.has(p.id)) || (clearConfirm && completedIdSet.has(p.id)) ? " selected" : "")
               }
               onPointerDown={(e) => {
                 if (selMode) return;
@@ -459,7 +457,7 @@ export default function ProjectListView() {
                           (overIdx === c.id && dragId !== c.id
                             ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                             : "") +
-                          ((selMode || clearConfirm) && selected.has(c.id) ? " selected" : "")
+                          ((selMode && selected.has(c.id)) || (clearConfirm && completedIdSet.has(c.id)) ? " selected" : "")
                         }
                         rowProps={{
                           "data-drag-idx": c.id,

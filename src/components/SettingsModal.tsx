@@ -6,12 +6,18 @@
 import { useState } from "react";
 import Modal from "./common/Modal";
 import SlotBoundsModal from "./SlotBoundsModal";
+import WeeklyReviewModal from "./WeeklyReviewModal";
+import ReminderPersonalizationModal from "./ReminderPersonalizationModal";
+import { getWeeklyReview, weekdayLabel } from "../utils/weeklyReview";
+import { CORNER_LABELS, getReminderPrefs } from "../utils/reminderPrefs";
 
 interface SettingsModalProps {
   autostart: boolean;
   onToggleAutostart: () => void;
   checkSoundOn: boolean;
   onToggleCheckSound: () => void;
+  // 1.1.5：Inbox 每周回顾的预览卡需要真实条数
+  inboxCount: number;
   isDev?: boolean;
   onClose: () => void;
 }
@@ -27,6 +33,7 @@ export default function SettingsModal({
   onToggleAutostart,
   checkSoundOn,
   onToggleCheckSound,
+  inboxCount,
   isDev,
   onClose,
 }: SettingsModalProps) {
@@ -37,11 +44,23 @@ export default function SettingsModal({
     else onToggleCheckSound();
   };
 
-  // 子弹窗（时段分界线）的开关状态，数据在 localStorage，不污染 App。
+  // 子弹窗（时段分界线 / Inbox 每周回顾 / 弹窗个性化）的开关状态，数据在 localStorage，不污染 App。
   const [slotBoundsOpen, setSlotBoundsOpen] = useState(false);
+  const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
+  const [personalizationOpen, setPersonalizationOpen] = useState(false);
+  // 1.1.5：每周回顾的设置摘要（子弹窗保存后回读，保证入口行文案即时更新）
+  const [weeklyReview, setWeeklyReview] = useState(getWeeklyReview());
+  const refreshWeeklyReview = () => setWeeklyReview(getWeeklyReview());
+  // 1.1.5：弹窗个性化摘要（位置 / 宽度 / 稍后时长 / 总开关）
+  const [reminderPrefs, setReminderPrefs] = useState(getReminderPrefs());
+  const refreshReminderPrefs = () => setReminderPrefs(getReminderPrefs());
 
   return (
-    <Modal title="设置" onClose={onClose} closeOnEsc={!slotBoundsOpen}>
+    <Modal
+      title="设置"
+      onClose={onClose}
+      closeOnEsc={!slotBoundsOpen && !weeklyReviewOpen && !personalizationOpen}
+    >
       <p className="muted shortcut-tip">
         所有开关类设置集中于此，点击右侧开关即可实时切换。
       </p>
@@ -86,9 +105,61 @@ export default function SettingsModal({
             ›
           </span>
         </button>
+
+        {/* 1.1.5：Inbox 每周回顾（默认周日，可改周一–周日）。 */}
+        <button
+          type="button"
+          className="settings-row"
+          onClick={() => setWeeklyReviewOpen(true)}
+        >
+          <span className="settings-row-text">
+            <span className="settings-row-label">Inbox 每周回顾</span>
+            <span className="settings-row-hint muted">
+              {weeklyReview.enabled
+                ? `每周${weekdayLabel(weeklyReview.weekday).slice(1)}提醒你整理 Inbox`
+                : "已关闭（可点开重新启用）"}
+            </span>
+          </span>
+          <span className="settings-row-chevron" aria-hidden="true">
+            ›
+          </span>
+        </button>
+        {/* 1.1.5：弹窗个性化（开关 / 四角位置 / 宽度 / 每日摘要 / 稍后时长）。 */}
+        <button
+          type="button"
+          className="settings-row"
+          onClick={() => setPersonalizationOpen(true)}
+        >
+          <span className="settings-row-text">
+            <span className="settings-row-label">弹窗个性化</span>
+            <span className="settings-row-hint muted">
+              {reminderPrefs.enabled
+                ? `${CORNER_LABELS[reminderPrefs.corner]} · 宽 ${
+                    reminderPrefs.width
+                  }px · 稍后 ${reminderPrefs.snoozeMinutes} 分钟`
+                : "弹窗通知已关闭（点开可重新启用）"}
+            </span>
+          </span>
+          <span className="settings-row-chevron" aria-hidden="true">
+            ›
+          </span>
+        </button>
       </div>
 
       {slotBoundsOpen && <SlotBoundsModal onClose={() => setSlotBoundsOpen(false)} />}
+      {weeklyReviewOpen && (
+        <WeeklyReviewModal
+          inboxCount={inboxCount}
+          onSaved={refreshWeeklyReview}
+          onClose={() => setWeeklyReviewOpen(false)}
+        />
+      )}
+      {personalizationOpen && (
+        <ReminderPersonalizationModal
+          onSaved={refreshReminderPrefs}
+          onClose={() => setPersonalizationOpen(false)}
+        />
+      )}
     </Modal>
   );
 }

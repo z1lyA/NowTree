@@ -5,6 +5,8 @@
 import { useEffect } from "react";
 import { onToast } from "../toast";
 import type { ToastAction } from "./useToast";
+import { invoke } from "@tauri-apps/api/core";
+import type { Transaction } from "../types/transaction";
 
 // 提醒扫描周期（毫秒）：每 30 秒检查一次到期且未弹过的提醒。
 export const REMINDER_SCAN_MS = 30000;
@@ -16,6 +18,41 @@ export function useReminderScan(checkReminders: () => void) {
     }, REMINDER_SCAN_MS);
     return () => clearInterval(timer);
   }, [checkReminders]);
+}
+
+// 1.1.5：到点**精确**触发提醒（不再依赖 30 秒轮询的粒度）。
+//  - 前端按 active 里最早的一条 reminder_time 设一个兜底 setTimeout；
+//  - 同时交给 Rust 精确等待（schedule_reminder_fire），到点后 emit nowtree:reminder-due，
+//    由主窗口监听并调用 checkReminders——窗口在托盘 / 被系统节流时也比纯前端定时更可靠。
+//  - 30 秒轮询仍保留（useReminderScan），作为系统休眠 / 事件丢失时的兜底。
+export function useReminderScheduler(
+  checkReminders: () => void,
+  active: Transaction[],
+) {
+  useEffect(() => {
+    const now = Date.now();
+    let next: number | null = null;
+    for (const t of active) {
+      if (t.status === "completed" || t.reminder_done === 1 || !t.reminder_time) continue;
+      const ts = new Date(t.reminder_time).getTime();
+      if (!Number.isFinite(ts)) continue;
+      if (ts <= now) {
+        next = now; // 已到期：立刻补一次
+        break;
+      }
+      if (next === null || ts < next) next = ts;
+    }
+
+    // null = 没有待触发的提醒，顺手取消 Rust 侧的旧定时器
+    void invoke("schedule_reminder_fire", { atMs: next }).catch(() => {});
+    if (next === null) return;
+
+    const timer = window.setTimeout(
+      () => void checkReminders(),
+      Math.max(0, next - Date.now()) + 60,
+    );
+    return () => window.clearTimeout(timer);
+  }, [active, checkReminders]);
 }
 
 export function useDeadlineNormalize(normalize: () => void) {

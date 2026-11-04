@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "reminder",
+  "description": "capability for the custom reminder popup window",
+  "windows": ["reminder"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}

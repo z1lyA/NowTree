@@ -655,9 +655,26 @@ pub fn set_autostart(app: tauri::AppHandle, enable: bool) -> Result<bool, String
 #[tauri::command]
 pub fn minimize_to_tray(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        // 1.1.5：关闭确认时窗口会被临时置顶，隐藏前先复位，避免下次显示仍压在最上层。
+        let _ = w.set_always_on_top(false);
         #[cfg(target_os = "windows")]
         let _ = w.set_skip_taskbar(true);
         let _ = w.hide();
+    }
+}
+
+// 1.1.5：关闭确认框弹出前，把主窗口强制提到最前（含从最小化 / 托盘隐藏恢复）。
+// 只发事件不激活窗口时，窗口压在其它程序下面，用户看不到确认框、还得先手动调出窗口。
+#[tauri::command]
+pub fn bring_main_to_front(app: tauri::AppHandle) {
+    crate::bring_main_front_topmost(&app);
+}
+
+// 1.1.5：取消 / 选择关闭方式后解除临时置顶，恢复正常窗口层级。
+#[tauri::command]
+pub fn release_main_topmost(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_always_on_top(false);
     }
 }
 

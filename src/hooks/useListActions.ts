@@ -32,15 +32,27 @@ export interface ListActionsConfig {
 export function useListActions(cfg: ListActionsConfig) {
   const { reorder, updateTx, loadTrash, active, releaseDescendants } = useTxStore();
 
+  // 1.1.5：每次渲染都实时取「当前已完成 id」。
+  // 此前首次点「一键清理」会把 getCompletedIds() 的结果快照进 selected，按钮数字读 selected.size，
+  // 二次确认也删 selected——于是确认态期间新勾选的事务既不计入数字、也不会被清理。
+  // 现在把实时结果暴露给视图（计数 / 行高亮 / 禁用判定），确认时再重算一次兜底。
+  const completedIds = cfg.getCompletedIds();
+
   // 排序：各视图保留自己的比较器（Project 完成度排序不同），只统一最后的 reorder 调用。
   function applySort(sortedIds: number[]) {
     reorder(sortedIds);
   }
 
-  // 一键清理：首次仅选中已完成并进入确认态；二次才批量删除。
+  // 一键清理：首次仅选中已完成并进入确认态；二次才批量删除（删除范围实时重算）。
   async function cleanCompleted() {
     if (cfg.clearConfirm) {
-      await cfg.deleteSelected([...cfg.selected]);
+      const ids = cfg.getCompletedIds(); // 确认那一刻重新取，绝不用进入确认态时的快照
+      if (ids.length === 0) {
+        cfg.setSelected(new Set());
+        cfg.setClearConfirm(false);
+        return;
+      }
+      await cfg.deleteSelected(ids);
       playClearSound(); // 1.0.3：二次确认后真正删除时播放清理音（受全局音效开关控制）
       await loadTrash();
       cfg.setSelected(new Set());
@@ -48,6 +60,7 @@ export function useListActions(cfg: ListActionsConfig) {
       return;
     }
     const ids = cfg.getCompletedIds();
+    if (ids.length === 0) return;
     cfg.setSelected(new Set(ids));
     cfg.setClearConfirm(true);
   }
@@ -109,5 +122,5 @@ export function useListActions(cfg: ListActionsConfig) {
     if (cfg.onMoved) cfg.onMoved(blocked);
   }
 
-  return { applySort, cleanCompleted, cancelClean, batchDelete, moveTo };
+  return { applySort, cleanCompleted, cancelClean, batchDelete, moveTo, completedIds };
 }

@@ -35,6 +35,8 @@ export interface UseShellReturn {
   setResetConfirmOpen: (v: boolean) => void;
   setCloseConfirm: (v: boolean) => void;
   setDontAskAgain: (v: boolean) => void;
+  // 1.1.5：取消关闭确认（Esc / 点遮罩 / ×）——同时解除窗口临时置顶
+  dismissCloseConfirm: () => void;
   dismissImport: () => void;
   handleExport: () => Promise<void>;
   handleImport: () => Promise<void>;
@@ -78,6 +80,9 @@ export function useShell(deps: UseShellDeps): UseShellReturn {
           // 1.1.0：同时收起数据弹窗内的应用内二级确认，避免关闭确认框与之叠层
           setResetConfirmOpen(false);
           setImportMeta(null);
+          // 1.1.5：窗口可能压在其它程序下面（或已最小化），只发事件用户看不到确认框。
+          // 先把主窗口提到最前并临时置顶，再渲染确认框；取消/选择后由下面两处解除置顶。
+          invoke("bring_main_to_front").catch(() => {});
           setCloseConfirm(true);
         });
       } catch {
@@ -100,7 +105,16 @@ export function useShell(deps: UseShellDeps): UseShellReturn {
     }
     setCloseConfirm(false);
     setDontAskAgain(false);
+    // 1.1.5：解除关闭确认时的临时置顶（minimize_to_tray 内也会复位一次，双保险）
+    invoke("release_main_topmost").catch(() => {});
     invoke(action === "exit" ? "quit_app" : "minimize_to_tray");
+  };
+
+  // 1.1.5：取消关闭确认（Esc / 点遮罩 / × 共用）——关框并解除临时置顶。
+  const dismissCloseConfirm = () => {
+    setCloseConfirm(false);
+    setDontAskAgain(false);
+    invoke("release_main_topmost").catch(() => {});
   };
 
   // 进入时读取开机自启动状态
@@ -198,6 +212,7 @@ export function useShell(deps: UseShellDeps): UseShellReturn {
     setResetConfirmOpen,
     setCloseConfirm,
     setDontAskAgain,
+    dismissCloseConfirm,
     dismissImport: () => setImportMeta(null),
     handleExport,
     handleImport,

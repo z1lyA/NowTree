@@ -6,7 +6,8 @@ import type { Transaction, Status, Category, TxFields } from "../types/transacti
 import { normalizeDeadline } from "../types/transaction";
 import type { ConvertInput } from "../data/repository";
 import { collectSubtreeIds, collectReleaseIds } from "../services/transactionService";
-import { notify } from "../services/notification";
+import { pushReminderCards, reminderCardOf } from "../services/reminders";
+import type { ReminderCard } from "../services/reminderCards";
 
 // 生成当前 ISO 时间；用于完成时间等字段
 const nowISO = () => new Date().toISOString();
@@ -390,13 +391,15 @@ export const useTxStore = create<TxStore>((set, get) => ({
     await Promise.all(jobs);
   },
 
-  // 提醒检查：遍历到期且未弹过的 active 事务，弹系统通知并标记已弹。
+  // 提醒检查：遍历到期且未弹过的 active 事务，弹右下角自定义提醒卡并标记已弹。
   // A2 修复 + 并发加固：
   //   - 原 bug：先发通知、后标记；通知一旦抛错则标记永不发生 → 每轮重弹死循环。
   //   - 加固点：在发起任何 await 之前，先「同步」把内存里这条置为已弹（乐观预标记），
   //     关闭并发扫描的竞态窗口——即便 App 因 StrictMode 双挂载等原因产生两轮扫描，
   //     第二轮一读内存就已经是 reminder_done=1，绝不会重复发送。
   //   - DB 标记保证跨重启去重；内存预标记保证同会话内不重发。
+  // 1.1.5：通知方式由系统通知改为「右下角自定义提醒卡」——逐条写库后一次性把卡片交给
+  // Rust（只建一个窗口，多张卡纵向堆叠），不再每张卡各建一次窗口。
   checkReminders: async () => {
     const now = Date.now();
     const due = get().active.filter(
@@ -406,6 +409,7 @@ export const useTxStore = create<TxStore>((set, get) => ({
         t.reminder_done !== 1 &&
         new Date(t.reminder_time).getTime() <= now,
     );
+    const cards: ReminderCard[] = [];
     for (const t of due) {
       // 乐观预标记：在任何异步之前先把内存置「已弹=1 + 清空 reminder_time」，
       // 杜绝并发扫描重复发送，并让铃铛图标立即消失（提醒已触发，无需再展示「有待办提醒」）。
@@ -418,9 +422,16 @@ export const useTxStore = create<TxStore>((set, get) => ({
         // clear_reminder=true 让后端把 reminder_time 置 NULL（直接传 null 会被「有值才改」逻辑跳过）；
         // 这样提醒触发后即自数据层彻底清除，不会「已弹过却还挂着提醒」反复提示。
         await get().updateTx(t.id, { reminder_done: 1, clear_reminder: true });
-        await notify("NowTree 提醒", t.title + (t.note ? "\n" + t.note : ""));
+        cards.push(reminderCardOf(t));
       } catch {
-        // 写库或通知失败：内存已标记 + 已清，不会重弹；写库失败仅影响跨重启去重（下一轮会重试一次，无害）
+        // 写库失败：内存已标记 + 已清，不会重弹；仅影响跨重启去重（下一轮会重试一次，无害）
+      }
+    }
+    if (cards.length > 0) {
+      try {
+        await pushReminderCards(cards);
+      } catch {
+        // 弹窗创建失败（如系统限制）：DB 已标记已弹，本轮不重复；不再走系统通知兜底。
       }
     }
   },

@@ -1,11 +1,10 @@
-﻿import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { listen } from "@tauri-apps/api/event";
 import InboxView from "./components/InboxView";
 import CategoryListView from "./components/CategoryListView";
 import ProjectListView from "./components/ProjectListView";
 import NextView from "./components/NextView";
-import StartupModal from "./components/StartupModal";
-import { currentClockSlot } from "./utils/clock";
 import TrashModal from "./components/TrashModal";
 import TrashDrop from "./components/TrashDrop";
 import ShortcutsModal from "./components/ShortcutsModal";
@@ -14,14 +13,17 @@ import DataModal from "./components/DataModal";
 import SettingsModal from "./components/SettingsModal";
 import Modal from "./components/common/Modal";
 import { useTxStore } from "./store/useTxStore";
-import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import type { TimeSlot } from "./types/transaction";
 import { CATEGORIES, CATEGORY_META } from "./types/transaction";
 import { useToast } from "./hooks/useToast";
 import { useTheme } from "./hooks/useTheme";
 import { useShell } from "./hooks/useShell";
+import { useWeeklyReview } from "./hooks/useWeeklyReview";
+import { useDailyDigest } from "./hooks/useDailyDigest";
+import { resetStaleReminderMarksOnce } from "./utils/reminderMarks";
 import {
   useReminderScan,
+  useReminderScheduler,
   useDeadlineNormalize,
   useToastSubscription,
 } from "./hooks/useLifecycle";
@@ -52,22 +54,9 @@ export default function App() {
   const [dataOpen, setDataOpen] = useState(false);
   // 0.2.0：设置弹窗（聚合所有开关类设置：开机自启动 / 勾选提示音…）
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // 0.1.16：每次启动弹「今天」介绍弹窗（开发刷新也会弹）
-  const [startupOpen, setStartupOpen] = useState(true);
-  // 1.0.4：跨边界重弹——记录最近一次已提示的时段，定时对比当前钟点，越过边界则重新弹出
-  const lastNotifiedSlotRef = useRef(currentClockSlot());
-  const closeConfirmRef = useRef(false);
-  useEffect(() => {
-    if (startupOpen) lastNotifiedSlotRef.current = currentClockSlot();
-  }, [startupOpen]);
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!startupOpen && !closeConfirmRef.current && currentClockSlot() !== lastNotifiedSlotRef.current) {
-        setStartupOpen(true);
-      }
-    }, 30000);
-    return () => clearInterval(id);
-  }, [startupOpen]);
+  // 1.1.5：数据就绪标记——每日摘要卡要等 active 读完再判断，避免误显示「暂无安排」。
+  // 原「今日」启动弹窗已由右下角每日摘要卡接管（见 useDailyDigest），不再有自动弹窗。
+  const [dataReady, setDataReady] = useState(false);
   // C11 修复：运行时计算真实 SQLite 文件路径，替代原硬编码（含未替换占位符「你」）。
   // 适配不同用户名 / 系统，浏览器预览环境则提示数据仅存内存。
   const [dbPath, setDbPath] = useState<string>("");
@@ -78,29 +67,67 @@ export default function App() {
   const loadTrash = useTxStore((s) => s.loadTrash);
   const checkReminders = useTxStore((s) => s.checkReminders);
   const normalizeDeadlines = useTxStore((s) => s.normalizeDeadlines);
+  const inbox = useTxStore((s) => s.inbox);
+  const active = useTxStore((s) => s.active);
 
   // 0.1.19：toast / 主题 / 提醒扫描 / deadline 归一 抽离为独立 hook，降低 App 体积。
   const { toast, toastAction, showToast } = useToast();
   const { theme, chooseTheme } = useTheme();
   useReminderScan(checkReminders);
+  // 1.1.5：精确到点的提醒调度（Rust 定时 + 前端兜底），不再等 30 秒轮询。
+  useReminderScheduler(checkReminders, active);
   useDeadlineNormalize(normalizeDeadlines);
   useToastSubscription(showToast);
+  // 1.1.5：Inbox 每周回顾 + 每日摘要卡（两者都走右下角自定义提醒窗口）
+  useWeeklyReview(inbox.length);
+  useDailyDigest(dataReady);
 
-  // 挂载：预拉取 active；请求通知权限。
+  // 挂载：预拉取 active 与 inbox（每周回顾需要条数、每日摘要需要清单），完成后再标记就绪。
+  // 1.1.5：先做一次性的提醒标记清理——早期开发构建在「建窗死锁」前就写了「今天已推送」，
+  // 若不清掉，修复版当天会看不到每日摘要卡（详见 utils/reminderMarks.ts）。
   useEffect(() => {
-    loadActive();
+    resetStaleReminderMarksOnce();
+    let cancelled = false;
+    (async () => {
+      await loadActive();
+      await loadInbox();
+      if (!cancelled) setDataReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadActive, loadInbox]);
+
+  // 1.1.5：右下角提醒窗口的回写 / 跳转（两窗口通过事件协作）。
+  //   nowtree:data-changed   —— 弹窗里「完成 / 稍后」已写库，主窗口刷新列表；
+  //   nowtree:open-view      —— 每周回顾「去整理」→ 切到 Inbox；
+  //   nowtree:reminder-due   —— Rust 精确定时到点，触发一次提醒扫描。
+  useEffect(() => {
+    let unDataChanged: (() => void) | undefined;
+    let unOpenView: (() => void) | undefined;
+    let unReminderDue: (() => void) | undefined;
     (async () => {
       try {
-        let granted = await isPermissionGranted();
-        if (!granted) {
-          const res = await requestPermission();
-          granted = res === "granted";
-        }
+        unDataChanged = await listen("nowtree:data-changed", () => {
+          void loadActive();
+          void loadInbox();
+        });
+        unOpenView = await listen<string>("nowtree:open-view", (e) => {
+          if (e.payload === "inbox") setView("inbox");
+        });
+        unReminderDue = await listen("nowtree:reminder-due", () => {
+          void checkReminders();
+        });
       } catch {
-        /* 非 Tauri 环境（浏览器）忽略 */
+        /* 非 Tauri 环境（浏览器预览）忽略 */
       }
     })();
-  }, [loadActive]);
+    return () => {
+      unDataChanged?.();
+      unOpenView?.();
+      unReminderDue?.();
+    };
+  }, [loadActive, loadInbox, checkReminders]);
 
   // C11 修复：挂载时解析真实数据文件绝对路径（依赖 Tauri 的 appDataDir，
   // 由 identifier 决定，不随用户名/系统写死）。浏览器预览环境给出内存提示。
@@ -160,7 +187,6 @@ export default function App() {
     setDataOpen,
     // 1.1.0：关闭确认弹出前先收起其他覆盖层，确保关闭确认始终置顶
     dismissOverlays: () => {
-      setStartupOpen(false);
       setSettingsOpen(false);
       setDataOpen(false);
       setTrashOpen(false);
@@ -168,11 +194,6 @@ export default function App() {
       setThemeOpen(false);
     },
   });
-
-  // 1.1.0：镜像关闭确认状态到 ref，供跨边界重弹定时器判断（避免关闭确认展示期间被每日弹窗顶回）
-  useEffect(() => {
-    closeConfirmRef.current = shell.closeConfirm;
-  }, [shell.closeConfirm]);
 
   // 快捷键：1-5 切换视图；Enter 打开当前视图的加号（nowtree:quick-add 由各视图监听）
   useEffect(() => {
@@ -309,7 +330,7 @@ export default function App() {
               </button>
               <div className="side-menu-sep" />
               <div className="side-menu-motto">种一棵树最好的时间是十年前，其次是现在</div>
-              <div className="side-menu-version">v1.1.4 · 本地 SQLite</div>
+              <div className="side-menu-version">v1.1.5 · 本地 SQLite</div>
             </div>
           )}
         </div>
@@ -391,6 +412,7 @@ export default function App() {
           onToggleAutostart={shell.toggleAutostart}
           checkSoundOn={shell.checkSoundOn}
           onToggleCheckSound={shell.toggleCheckSound}
+          inboxCount={inbox.length}
           isDev={isDev}
           onClose={() => setSettingsOpen(false)}
         />
@@ -398,7 +420,7 @@ export default function App() {
       {shell.closeConfirm && (
         <Modal
           title="关闭 NowTree"
-          onClose={() => { shell.setCloseConfirm(false); shell.setDontAskAgain(false); }}
+          onClose={shell.dismissCloseConfirm}
         >
           <div className="close-confirm">
             <p className="close-confirm-tip">要最小化到托盘，还是退出程序？</p>
@@ -428,14 +450,6 @@ export default function App() {
             </div>
           </div>
         </Modal>
-      )}
-      {startupOpen && (
-        <StartupModal
-          onClose={() => {
-            lastNotifiedSlotRef.current = currentClockSlot();
-            setStartupOpen(false);
-          }}
-        />
       )}
       {/* 1.1.3：拖拽删除垃圾桶——仅拖拽中显形，挂载于 App 顶层，五视图通用 */}
       <TrashDrop />

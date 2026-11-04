@@ -152,7 +152,9 @@ export default function GenericListView({ mode }: GenericListViewProps) {
       ? async (ids) => { for (const id of ids) await removeInbox(id); }
       : async (ids) => { for (const id of ids) await deleteTx(id); },
   });
-  const { cleanCompleted, cancelClean, batchDelete, moveTo } = listActions;
+  const { cleanCompleted, cancelClean, batchDelete, moveTo, completedIds } = listActions;
+  // 1.1.5：确认清理态的行高亮跟随「实时已完成集合」；普通多选仍用 selected。
+  const completedIdSet = new Set(completedIds);
   function applySort(m: "priority" | "time" | "completion") {
     const sorted = [...items].sort(
       m === "priority" ? byPriority : m === "completion" ? byCompletion : byTime,
@@ -228,13 +230,13 @@ export default function GenericListView({ mode }: GenericListViewProps) {
 
       <ListToolbar
         selMode={selMode}
-        selectedCount={selected.size}
+        selectedCount={clearConfirm ? completedIds.length : selected.size}
         confirmBatch={confirmBatch}
         setConfirmBatch={setConfirmBatch}
         onToggleSelMode={() => { setDeletingId(null); toggleSelMode(); }}
         showClean={!inboxMode}
         cleanConfirm={clearConfirm}
-        cleanDisabled={!clearConfirm && ordered.filter((t) => t.status === "completed").length === 0}
+        cleanDisabled={completedIds.length === 0}
         onClean={cleanCompleted}
         onCancelClean={cancelClean}
         showSort={!inboxMode}
@@ -302,7 +304,10 @@ export default function GenericListView({ mode }: GenericListViewProps) {
                 (overIdx === t.id && dragId !== t.id
                   ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                   : "") +
-                ((selMode || (!inboxMode && clearConfirm)) && selected.has(t.id) ? " selected" : "")
+                ((selMode && selected.has(t.id)) ||
+                  (!inboxMode && clearConfirm && completedIdSet.has(t.id))
+                  ? " selected"
+                  : "")
               }
               onPointerDown={(e) => {
                 if (selMode) return;
