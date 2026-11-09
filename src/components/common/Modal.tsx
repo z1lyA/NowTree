@@ -1,5 +1,7 @@
 // 通用弹窗容器：遮罩 + 标题栏 + 关闭按钮 + children。
 // 后续创建 / 编辑事务弹窗都复用它，避免重复遮罩与滚动锁逻辑。
+// 1.1.6：默认**不允许点遮罩关闭**——点空白处误触会把刚填的内容全丢掉；
+// 关闭统一走「× / Esc / 弹窗内的取消按钮」，需要放开时显式传 closeOnMask。
 import { useEffect } from "react";
 import type { ReactNode, KeyboardEvent } from "react";
 
@@ -11,6 +13,9 @@ interface ModalProps {
   // 是否允许 Esc 关闭；嵌套弹窗（如设置内的子弹窗）打开时，
   // 将外层弹窗的此项置 false，避免一次 Esc 把内外两层一起关掉。
   closeOnEsc?: boolean;
+  // 是否允许点遮罩关闭；默认 false（1.1.6 起），只有「没有输入内容、误关也无所谓」的
+  // 弹窗才建议显式打开。
+  closeOnMask?: boolean;
 }
 
 export default function Modal({
@@ -19,6 +24,7 @@ export default function Modal({
   children,
   onKeyDown,
   closeOnEsc = true,
+  closeOnMask = false,
 }: ModalProps) {
   // 0.1.13：Esc 关闭当前弹窗（编辑 / 新增 / 整理 / 快捷键 / 回收站等）。
   // 批量转换模式下，ConvertModal 的 onClose 即「中断批量」，故 Esc 也会正确中断。
@@ -38,7 +44,9 @@ export default function Modal({
     <div
       className="modal-overlay"
       onMouseDown={(e) => {
-        // 1.0.3：仅在「直接按在遮罩本身」时关闭，排除从窗口内（如输入框拖选文本）发起的误触。
+        // 1.1.6：默认不再「点遮罩即关闭」——误点空白会把已填写内容全丢掉。
+        // 保留 1.0.3 的「仅直接按在遮罩本身」判断，供显式要求 closeOnMask 的弹窗使用。
+        if (!closeOnMask) return;
         if (e.target === e.currentTarget) onClose();
       }}
     >

@@ -1,6 +1,7 @@
 // 0.1.20：把 GenericListView / NextView / ProjectListView 里重复的工具栏收敛成共享组件。
 // 负责渲染：一键清理、排序下拉、多选开关、批量操作条（全选/取消/移动到/删除）。
 // 视图通过 props 传入当前状态与回调；视图专属按钮（如 Inbox 批量转换）通过 extra 插槽注入。
+// 1.1.6：一键清理 / 批量删除都不再有「二次确认」态，按钮不再变形，直接执行 + toast 撤销。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Category } from "../types/transaction";
 import { CATEGORIES, CATEGORY_LABELS } from "../types/transaction";
@@ -11,16 +12,12 @@ export interface ListToolbarProps {
   // 选择状态
   selMode: boolean;
   selectedCount: number;
-  confirmBatch: boolean;
-  setConfirmBatch: (v: boolean) => void;
   onToggleSelMode: () => void;
 
   // 一键清理
   showClean?: boolean;
-  cleanConfirm?: boolean;
   cleanDisabled?: boolean;
   onClean?: () => void;
-  onCancelClean?: () => void;
 
   // 排序
   showSort?: boolean;
@@ -46,14 +43,10 @@ export interface ListToolbarProps {
 export default function ListToolbar({
   selMode,
   selectedCount,
-  confirmBatch,
-  setConfirmBatch,
   onToggleSelMode,
   showClean = true,
-  cleanConfirm = false,
   cleanDisabled = false,
   onClean,
-  onCancelClean,
   showSort = true,
   onSort,
   showMove = true,
@@ -86,33 +79,25 @@ export default function ListToolbar({
     return () => document.removeEventListener("mousedown", handler);
   }, [sortOpen, moveOpen]);
 
-  // 退出多选时关闭下拉、重置确认态
+  // 退出多选时关闭下拉
   useEffect(() => {
     if (!selMode) {
       setSortOpen(false);
       setMoveOpen(false);
-      setConfirmBatch(false);
     }
-  }, [selMode, setConfirmBatch]);
+  }, [selMode]);
 
   return (
     <div className="list-toolbar">
       {showClean && (
-        <>
-          <button
-            className={"btn-ghost tb-btn" + (cleanConfirm ? " btn-danger on" : "")}
-            onClick={onClean}
-            disabled={cleanDisabled}
-            title={cleanDisabled ? "没有已完成的事务，无需清理" : undefined}
-          >
-            {cleanConfirm ? `确认清理？（${selectedCount}）` : "一键清理"}
-          </button>
-          {cleanConfirm && (
-            <button className="btn-ghost tb-btn" onClick={onCancelClean}>
-              取消
-            </button>
-          )}
-        </>
+        <button
+          className="btn-ghost tb-btn"
+          onClick={onClean}
+          disabled={cleanDisabled}
+          title={cleanDisabled ? "没有已完成的事务，无需清理" : "清理所有已完成事务，可在提示条里撤销"}
+        >
+          一键清理
+        </button>
       )}
 
       {showSort && (
@@ -176,11 +161,12 @@ export default function ListToolbar({
           )}
           {moveExtra}
           <button
-            className={"btn-danger" + (confirmBatch ? " on" : "")}
+            className="btn-danger"
             onClick={onBatchDelete}
             disabled={selectedCount === 0}
+            title="删除所选事务，可在提示条里撤销"
           >
-            {confirmBatch ? `确认删除（${selectedCount}）？` : `删除（${selectedCount}）`}
+            删除（{selectedCount}）
           </button>
         </div>
       )}

@@ -45,22 +45,21 @@ export default function TrashModal({ onClose }: TrashModalProps) {
     }
   }
   async function onEmpty() {
-    if (!confirmEmpty) {
-      setConfirmEmpty(true);
-      return;
-    }
+    const n = trash.length;
     setErr(null);
     try {
       await emptyTrash();
       setConfirmEmpty(false);
+      showToast(`已清空回收站（${n} 条）`);
     } catch (e) {
       // 把后端真实报错暴露出来，便于定位（如仍失败可看到原因）
+      setConfirmEmpty(false);
       setErr("清空失败：" + ((e as any)?.message ?? String(e)));
     }
   }
 
   return (
-    <Modal title="回收站" onClose={onClose}>
+    <Modal title="回收站" onClose={onClose} closeOnEsc={!confirmEmpty}>
       <p className="muted" style={{ marginTop: 0 }}>
         这里是被删除的事务。可「恢复」回到原列表；「彻底删除」将从本地数据库永久移除、不可恢复。
       </p>
@@ -113,14 +112,37 @@ export default function TrashModal({ onClose }: TrashModalProps) {
           关闭
         </button>
         <button
-          className={`btn-danger ${confirmEmpty ? "on" : ""}`}
-          onClick={onEmpty}
+          className="btn-danger"
+          onClick={() => setConfirmEmpty(true)}
           disabled={trash.length === 0}
-          title={trash.length === 0 ? "回收站为空，无需清空" : undefined}
+          title={trash.length === 0 ? "回收站为空，无需清空" : "永久删除回收站里的全部事务"}
         >
-          {confirmEmpty ? "确认清空？" : "清空回收站"}
+          清空回收站
         </button>
       </div>
+
+      {/* 1.1.6：清空不可恢复，改成「弹窗二次确认」，不再让按钮自己变形。
+          外层同时置 closeOnEsc=false，避免一次 Esc 把确认框和回收站一起关掉。 */}
+      {confirmEmpty && (
+        <Modal title="确认清空回收站" onClose={() => setConfirmEmpty(false)}>
+          <div className="close-confirm">
+            <p className="close-confirm-tip">
+              回收站里的 <strong>{trash.length}</strong> 条事务将被<strong>永久删除</strong>，无法恢复。
+            </p>
+            <p className="muted close-confirm-tip">
+              如果其中还有想留的内容，请先「恢复」它们，或取消后逐条处理。
+            </p>
+            <div className="close-confirm-actions">
+              <button type="button" className="btn-ghost" onClick={() => setConfirmEmpty(false)}>
+                取消
+              </button>
+              <button type="button" className="btn-danger" onClick={onEmpty}>
+                确认清空
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

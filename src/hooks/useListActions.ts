@@ -1,22 +1,22 @@
 // 列表视图共用的「工具栏动作」收口（0.1.20，B3 重构）。
 // GenericListView / NextView / ProjectListView 三处 cleanCompleted / batchDelete /
-// moveTo / cancelClean 逻辑逐字重复，仅「已完成 id 来源」「删除方式（inbox 走 removeInbox
+// moveTo 逻辑逐字重复，仅「已完成 id 来源」「删除方式（inbox 走 removeInbox
 // 还是类别走 deleteTx）」「移动拦截（Project 含子父事务不可移动）」有差异。
-// 把不变的部分（二次确认态、加载回收站、清空选择、写回 store）收进本 hook，
+// 把不变的部分（加载回收站、清空选择、写回 store）收进本 hook，
 // 差异点由各视图以回调注入，既消除重复又保留各自语义。
+//
+// 1.1.6：一键清理 / 批量删除去掉「二次确认」，改成点了就删 + toast 撤销条。
+// 删除仍是软删进回收站，撤销 = restoreMany；但软删会级联后代、restore 不级联，
+// 所以删除前先用 collectUndoIds 记下「根 + 整棵子树」，撤销时一起恢复。
 import { useTxStore } from "../store/useTxStore";
 import type { Category } from "../types/transaction";
-import { buildCategoryPatch } from "../services/transactionService";
+import { buildCategoryPatch, collectUndoIds } from "../services/transactionService";
 import { playClearSound } from "../utils/clearSound";
 import { showToast } from "../toast";
 
 export interface ListActionsConfig {
   selected: Set<number>;
   setSelected: (s: Set<number>) => void;
-  clearConfirm: boolean;
-  setClearConfirm: (b: boolean) => void;
-  confirmBatch: boolean;
-  setConfirmBatch: (b: boolean) => void;
   selMode: boolean;
   setSelMode: (b: boolean) => void;
   // 选中「已完成」的 id（各视图语义不同：Project 含子事务）。
@@ -30,12 +30,12 @@ export interface ListActionsConfig {
 }
 
 export function useListActions(cfg: ListActionsConfig) {
-  const { reorder, updateTx, loadTrash, active, releaseDescendants } = useTxStore();
+  const { reorder, updateTx, loadTrash, active, inbox, releaseDescendants, restoreMany } =
+    useTxStore();
 
-  // 1.1.5：每次渲染都实时取「当前已完成 id」。
-  // 此前首次点「一键清理」会把 getCompletedIds() 的结果快照进 selected，按钮数字读 selected.size，
-  // 二次确认也删 selected——于是确认态期间新勾选的事务既不计入数字、也不会被清理。
-  // 现在把实时结果暴露给视图（计数 / 行高亮 / 禁用判定），确认时再重算一次兜底。
+  // 1.1.5：每次渲染都实时取「当前已完成 id」，按钮可用性 / 清理范围都读它，
+  // 避免确认态期间数据集变化导致「数字与实际删除范围不一致」。
+  // 1.1.6 去掉确认态后仍保留实时口径：点下去那一刻才算数。
   const completedIds = cfg.getCompletedIds();
 
   // 排序：各视图保留自己的比较器（Project 完成度排序不同），只统一最后的 reorder 调用。
@@ -43,43 +43,44 @@ export function useListActions(cfg: ListActionsConfig) {
     reorder(sortedIds);
   }
 
-  // 一键清理：首次仅选中已完成并进入确认态；二次才批量删除（删除范围实时重算）。
-  async function cleanCompleted() {
-    if (cfg.clearConfirm) {
-      const ids = cfg.getCompletedIds(); // 确认那一刻重新取，绝不用进入确认态时的快照
-      if (ids.length === 0) {
-        cfg.setSelected(new Set());
-        cfg.setClearConfirm(false);
-        return;
-      }
-      await cfg.deleteSelected(ids);
-      playClearSound(); // 1.0.3：二次确认后真正删除时播放清理音（受全局音效开关控制）
-      await loadTrash();
-      cfg.setSelected(new Set());
-      cfg.setClearConfirm(false);
-      return;
-    }
-    const ids = cfg.getCompletedIds();
+  // 删除 + 撤销条（1.1.6）：先把「根 + 整棵子树」记下来再删，删完 toast 给 5 秒撤销窗口。
+  // undoIds 必须在删除前算：软删后 active 里那些后代的父子关系已经查不到了。
+  async function deleteWithUndo(ids: number[], verb: "清理" | "删除") {
     if (ids.length === 0) return;
-    cfg.setSelected(new Set(ids));
-    cfg.setClearConfirm(true);
-  }
-
-  function cancelClean() {
-    cfg.setClearConfirm(false);
-    cfg.setSelected(new Set());
-  }
-
-  // 批量删除：首次进入确认态，二次执行。
-  async function batchDelete() {
-    if (!cfg.confirmBatch) {
-      cfg.setConfirmBatch(true);
-      return;
-    }
-    await cfg.deleteSelected([...cfg.selected]);
+    const undoIds = collectUndoIds([...active, ...inbox], ids);
+    await cfg.deleteSelected(ids);
     await loadTrash();
     cfg.setSelected(new Set());
-    cfg.setConfirmBatch(false);
+    showToast(`已${verb} ${ids.length} 项`, {
+      label: "撤销",
+      onClick: () => {
+        // 撤销成功后把提示条换成「已恢复」；失败（如库被占用）给可执行的下一步，
+        // 而不是让用户对着没反应的提示条发呆。
+        void (async () => {
+          try {
+            await restoreMany(undoIds);
+            showToast(`已恢复 ${ids.length} 项`);
+          } catch {
+            showToast("撤销失败，请到回收站里手动恢复");
+          }
+        })();
+      },
+    });
+  }
+
+  // 一键清理：点了就删全部已完成（1.1.6 去掉二次确认）。
+  async function cleanCompleted() {
+    const ids = cfg.getCompletedIds(); // 删除那一刻实时取，绝不用上一次渲染的旧值
+    if (ids.length === 0) return;
+    await deleteWithUndo(ids, "清理");
+    playClearSound(); // 1.0.3：清理音（受全局音效开关控制）
+  }
+
+  // 批量删除：同样点了就删（1.1.6 去掉二次确认），删完退出多选。
+  async function batchDelete() {
+    const ids = [...cfg.selected];
+    if (ids.length === 0) return;
+    await deleteWithUndo(ids, "删除");
     cfg.setSelMode(false);
   }
 
@@ -122,5 +123,5 @@ export function useListActions(cfg: ListActionsConfig) {
     if (cfg.onMoved) cfg.onMoved(blocked);
   }
 
-  return { applySort, cleanCompleted, cancelClean, batchDelete, moveTo, completedIds };
+  return { applySort, cleanCompleted, batchDelete, moveTo, completedIds };
 }

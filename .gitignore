@@ -65,3 +65,7 @@ Materials/
 # ---------- 一次性发版文档（仅本地参考，不进仓库） ----------
 RELEASE_NOTES*.md
 CHANGELOG_DRAFT*.md
+
+# ---------- AI agent 本地上下文（仅本地保留，不入库；忽略规则随下个版本提交） ----------
+AGENTS.md
+

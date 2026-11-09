@@ -54,8 +54,6 @@ export default function NextView({
   const [adding, setAdding] = useState(false);
   const { expandedNoteId, setExpandedNoteId, containerRef } = useNoteExpand();
 
-  const [clearConfirm, setClearConfirm] = useState(false);
-
   // 拖拽：dragId 当前拖动项；overSlot 悬停的栏（"left"=左栏）；overIdx 同栏内悬停目标行 id（排序指示）；overHalf 光标在目标行的上/下半（决定插上/插下）
   const [dragId, setDragId] = useState<number | null>(null);
   const [overSlot, setOverSlot] = useState<TimeSlot | "left" | null>(null);
@@ -103,8 +101,6 @@ export default function NextView({
     setSelMode,
     selected,
     setSelected,
-    confirmBatch,
-    setConfirmBatch,
     toggleSel,
     toggleSelMode,
     selectAllFiltered,
@@ -127,23 +123,17 @@ export default function NextView({
     return m;
   }, [items]);
 
-  // ===== 工具栏动作（统一收口到 useListActions，0.1.20 B3）=====
+  // ===== 工具栏动作（统一收口到 useListActions，0.1.20 B3；1.1.6 去掉二次确认）=====
   const listActions = useListActions({
     selected,
     setSelected,
-    clearConfirm,
-    setClearConfirm,
-    confirmBatch,
-    setConfirmBatch,
     selMode,
     setSelMode,
     getCompletedIds: () =>
       ordered.filter((t) => t.status === "completed").map((t) => t.id),
     deleteSelected: async (ids) => { for (const id of ids) await deleteTx(id); },
   });
-  const { cleanCompleted, cancelClean, batchDelete, moveTo, completedIds } = listActions;
-  // 1.1.5：确认清理态的行高亮跟随「实时已完成集合」；普通多选仍用 selected。
-  const completedIdSet = new Set(completedIds);
+  const { cleanCompleted, batchDelete, moveTo, completedIds } = listActions;
   function applySort(mode: "priority" | "time" | "completion") {
     const sorted = [...items].sort(
       mode === "priority" ? byPriority : mode === "completion" ? byCompletion : byTime,
@@ -164,7 +154,6 @@ export default function NextView({
   }
   function toggleSelModeLocal() {
     toggleSelMode();
-    setClearConfirm(false);
   }
 
   // 1.1.3：拖到垃圾桶删除。Next 永非 Inbox，故走软删（deleteTx 级联整棵子树）+ 撤销 toast。
@@ -598,14 +587,10 @@ export default function NextView({
       {/* 0.1.20：工具栏收敛为共享 ListToolbar */}
       <ListToolbar
         selMode={selMode}
-        selectedCount={clearConfirm ? completedIds.length : selected.size}
-        confirmBatch={confirmBatch}
-        setConfirmBatch={setConfirmBatch}
+        selectedCount={selected.size}
         onToggleSelMode={toggleSelModeLocal}
-        cleanConfirm={clearConfirm}
         cleanDisabled={completedIds.length === 0}
         onClean={cleanCompleted}
-        onCancelClean={cancelClean}
         onSort={applySort}
         onMove={moveTo}
         selectAllTitle="仅选中未分配时段的事务"
@@ -629,7 +614,7 @@ export default function NextView({
                   (overIdx === t.id && dragId !== t.id
                     ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                     : "") +
-                  ((selMode && selected.has(t.id)) || (clearConfirm && completedIdSet.has(t.id)) ? " selected" : "")
+                  (selMode && selected.has(t.id) ? " selected" : "")
                 }
                 rowProps={{
                   "data-drag-idx": t.id,
@@ -707,7 +692,7 @@ export default function NextView({
                   (overIdx === t.id && dragId !== t.id
                     ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                     : "") +
-                  ((selMode && selected.has(t.id)) || (clearConfirm && completedIdSet.has(t.id)) ? " selected" : "")
+                  (selMode && selected.has(t.id) ? " selected" : "")
                 }
                 rowProps={{
                   "data-drag-idx": t.id,

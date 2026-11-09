@@ -330,7 +330,7 @@ export default function App() {
               </button>
               <div className="side-menu-sep" />
               <div className="side-menu-motto">种一棵树最好的时间是十年前，其次是现在</div>
-              <div className="side-menu-version">v1.1.5 · 本地 SQLite</div>
+              <div className="side-menu-version">v1.1.6 · 本地 SQLite</div>
             </div>
           )}
         </div>

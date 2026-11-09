@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCategoryPatch, canShowInNext, sourceText, collectReleaseIds, canRestoreChild, nextTogglePatch, parentCandidates, attachToParentPatch, txSnapshotOf, isSameSnapshot } from "./transactionService";
+import { buildCategoryPatch, canShowInNext, sourceText, collectReleaseIds, collectUndoIds, canRestoreChild, nextTogglePatch, parentCandidates, attachToParentPatch, txSnapshotOf, isSameSnapshot } from "./transactionService";
 import type { TxSnapshot } from "./transactionService";
 import type { Transaction } from "../types/transaction";
 
@@ -214,5 +214,35 @@ describe("isSameSnapshot (编辑保存改动检测)", () => {
   ];
   it.each(mutations)("%s 改动 → false", (_key, patch) => {
     expect(isSameSnapshot(base, { ...base, ...patch })).toBe(false);
+  });
+});
+
+// 1.1.6：一键清理 / 批量删除点了就删，撤销靠删除前记下的「根 + 整棵子树」。
+describe("collectUndoIds", () => {
+  it("根 id 连同全部后代一起收集（含孙辈，任意层级）", () => {
+    const items = [
+      mk({ id: 1, category: "project" }),
+      mk({ id: 2, parent_id: 1 }),
+      mk({ id: 3, parent_id: 2 }),
+      mk({ id: 4, parent_id: 1 }),
+      mk({ id: 9 }),
+    ];
+    expect(collectUndoIds(items, [1]).sort()).toEqual([1, 2, 3, 4]);
+  });
+  it("多个根有重叠时去重，且不会把无关事务带进来", () => {
+    const items = [
+      mk({ id: 1, category: "project" }),
+      mk({ id: 2, parent_id: 1 }),
+      mk({ id: 3, parent_id: 2 }),
+      mk({ id: 9 }),
+    ];
+    expect(collectUndoIds(items, [1, 2]).sort()).toEqual([1, 2, 3]);
+  });
+  it("Inbox 事务没有子项：只返回自身（由调用方把 inbox 与 active 一起传入）", () => {
+    const items = [mk({ id: 7, status: "inbox", category: null })];
+    expect(collectUndoIds(items, [7])).toEqual([7]);
+  });
+  it("空选择 → 空数组（点清理但已完成列表为空时不制造空撤销）", () => {
+    expect(collectUndoIds([], [])).toEqual([]);
   });
 });

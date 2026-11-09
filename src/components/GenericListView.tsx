@@ -72,7 +72,6 @@ export default function GenericListView({ mode }: GenericListViewProps) {
   const [adding, setAdding] = useState(false);
   // 单条删除二次确认：deletingId 存待确认的事务 id
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [clearConfirm, setClearConfirm] = useState(false);
   // Inbox 批量转换队列（0.1.13）
   const [batchQueue, setBatchQueue] = useState<Transaction[]>([]);
   const [batchIdx, setBatchIdx] = useState(0);
@@ -100,8 +99,6 @@ export default function GenericListView({ mode }: GenericListViewProps) {
     setSelMode,
     selected,
     setSelected,
-    confirmBatch,
-    setConfirmBatch,
     toggleSelMode,
     toggleSel,
     selectAll,
@@ -117,14 +114,12 @@ export default function GenericListView({ mode }: GenericListViewProps) {
     }
   }, [inboxMode, inbox.length, active.length, loadInbox, loadActive]);
 
-  // 切换 mode 时重置多选 / 一键清理 / 待删态
+  // 切换 mode 时重置多选 / 待删态
   useEffect(() => {
     setSelMode(false);
     setSelected(new Set());
-    setConfirmBatch(false);
-    setClearConfirm(false);
     setDeletingId(null);
-  }, [mode, setSelMode, setSelected, setConfirmBatch]);
+  }, [mode, setSelMode, setSelected]);
 
   // 监听全局「快速新增」事件（App 在按 Enter 时派发）
   useEffect(() => {
@@ -134,14 +129,10 @@ export default function GenericListView({ mode }: GenericListViewProps) {
   }, []);
 
 
-  // ===== 工具栏动作（统一收口到 useListActions，0.1.20 B3）=====
+  // ===== 工具栏动作（统一收口到 useListActions，0.1.20 B3；1.1.6 去掉二次确认）=====
   const listActions = useListActions({
     selected,
     setSelected,
-    clearConfirm,
-    setClearConfirm,
-    confirmBatch,
-    setConfirmBatch,
     selMode,
     setSelMode,
     // 选中「已完成」的 id（类别模式：ordered 中已完成的）
@@ -152,9 +143,7 @@ export default function GenericListView({ mode }: GenericListViewProps) {
       ? async (ids) => { for (const id of ids) await removeInbox(id); }
       : async (ids) => { for (const id of ids) await deleteTx(id); },
   });
-  const { cleanCompleted, cancelClean, batchDelete, moveTo, completedIds } = listActions;
-  // 1.1.5：确认清理态的行高亮跟随「实时已完成集合」；普通多选仍用 selected。
-  const completedIdSet = new Set(completedIds);
+  const { cleanCompleted, batchDelete, moveTo, completedIds } = listActions;
   function applySort(m: "priority" | "time" | "completion") {
     const sorted = [...items].sort(
       m === "priority" ? byPriority : m === "completion" ? byCompletion : byTime,
@@ -230,15 +219,11 @@ export default function GenericListView({ mode }: GenericListViewProps) {
 
       <ListToolbar
         selMode={selMode}
-        selectedCount={clearConfirm ? completedIds.length : selected.size}
-        confirmBatch={confirmBatch}
-        setConfirmBatch={setConfirmBatch}
+        selectedCount={selected.size}
         onToggleSelMode={() => { setDeletingId(null); toggleSelMode(); }}
         showClean={!inboxMode}
-        cleanConfirm={clearConfirm}
         cleanDisabled={completedIds.length === 0}
         onClean={cleanCompleted}
-        onCancelClean={cancelClean}
         showSort={!inboxMode}
         onSort={applySort}
         showMove={!inboxMode}
@@ -304,10 +289,7 @@ export default function GenericListView({ mode }: GenericListViewProps) {
                 (overIdx === t.id && dragId !== t.id
                   ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                   : "") +
-                ((selMode && selected.has(t.id)) ||
-                  (!inboxMode && clearConfirm && completedIdSet.has(t.id))
-                  ? " selected"
-                  : "")
+                ((selMode && selected.has(t.id)) ? " selected" : "")
               }
               onPointerDown={(e) => {
                 if (selMode) return;

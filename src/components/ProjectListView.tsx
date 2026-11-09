@@ -43,7 +43,6 @@ export default function ProjectListView() {
   const [batchFor, setBatchFor] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
-  const [clearConfirm, setClearConfirm] = useState(false);
   // 0.1.13：每个父事务可单独对其子事务排序；childSortFor 记录当前展开子排序菜单的父事务 id
   const [childSortFor, setChildSortFor] = useState<number | null>(null);
   // 0.1.16：子事务折叠——记录已展开的父事务 id（默认空 = 全部收起）
@@ -94,8 +93,6 @@ export default function ProjectListView() {
     setSelMode,
     selected,
     setSelected,
-    confirmBatch,
-    setConfirmBatch,
     toggleSel,
     toggleSelMode,
     selectAll,
@@ -149,20 +146,15 @@ export default function ProjectListView() {
 
   function toggleSelModeLocal() {
     toggleSelMode();
-    setClearConfirm(false);
   }
 
-  // 0.1.13：一键清理——第一次点击仅选中所有已完成（含子事务）并进入确认态（不打开多选工具栏），
-  // 第二次点击才批量删除；确认态下可点右侧「取消」退出。
+  // 0.1.13：一键清理——清理所有已完成（含子事务）。
+  // 1.1.6：去掉二次确认，点了就删，删除结果在底部 toast 里给「撤销」。
   // 工具栏动作（含清理/批量删除/移动）统一收口到 useListActions（0.1.20 B3）；
   // Project 的差异点（含子事务的 id 来源、含子的父事务移动拦截）以回调注入。
   const listActions = useListActions({
     selected,
     setSelected,
-    clearConfirm,
-    setClearConfirm,
-    confirmBatch,
-    setConfirmBatch,
     selMode,
     setSelMode,
     // 一键清理候选：
@@ -190,9 +182,7 @@ export default function ProjectListView() {
       return { movable: ids, blocked: [] };
     },
   });
-  const { cleanCompleted, cancelClean, batchDelete, moveTo, completedIds } = listActions;
-  // 1.1.5：确认清理态的父/子行高亮跟随「实时已完成集合」；普通多选仍用 selected。
-  const completedIdSet = new Set(completedIds);
+  const { cleanCompleted, batchDelete, moveTo, completedIds } = listActions;
 
   // 0.1.19：子事务跨类别拖拽落点——拖到左侧导航栏改类别。
   // 规则：inbox 禁止互转（拖到 Inbox 导航不高亮、无操作）；
@@ -267,14 +257,10 @@ export default function ProjectListView() {
 
       <ListToolbar
         selMode={selMode}
-        selectedCount={clearConfirm ? completedIds.length : selected.size}
-        confirmBatch={confirmBatch}
-        setConfirmBatch={setConfirmBatch}
+        selectedCount={selected.size}
         onToggleSelMode={toggleSelModeLocal}
-        cleanConfirm={clearConfirm}
         cleanDisabled={completedIds.length === 0}
         onClean={cleanCompleted}
-        onCancelClean={cancelClean}
         onSort={applySort}
         onMove={moveTo}
         onSelectAll={selectAll}
@@ -319,7 +305,7 @@ export default function ProjectListView() {
                 (overIdx === p.id && dragId !== p.id
                   ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                   : "") +
-                ((selMode && selected.has(p.id)) || (clearConfirm && completedIdSet.has(p.id)) ? " selected" : "")
+                (selMode && selected.has(p.id) ? " selected" : "")
               }
               onPointerDown={(e) => {
                 if (selMode) return;
@@ -457,7 +443,7 @@ export default function ProjectListView() {
                           (overIdx === c.id && dragId !== c.id
                             ? ` drag-over ${overHalf === "bottom" ? "drag-over-bottom" : "drag-over-top"}`
                             : "") +
-                          ((selMode && selected.has(c.id)) || (clearConfirm && completedIdSet.has(c.id)) ? " selected" : "")
+                          (selMode && selected.has(c.id) ? " selected" : "")
                         }
                         rowProps={{
                           "data-drag-idx": c.id,

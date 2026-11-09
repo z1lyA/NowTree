@@ -1,6 +1,7 @@
 // 0.1.20：把三个列表视图里重复的选择状态逻辑收敛成共享 hook。
-// 负责管理：多选模式开关、已选集合、批量删除二次确认。
+// 负责管理：多选模式开关、已选集合。
 // 视图仍自己决定「全选范围」「批量删除/移动/清理」的具体行为，通过回调传回。
+// 1.1.6：批量删除改为「点了就删 + toast 撤销」，二次确认态（confirmBatch）整体移除。
 import { useState, useCallback } from "react";
 
 export interface UseSelectionOptions<T> {
@@ -13,8 +14,6 @@ export interface UseSelectionReturn {
   setSelMode: (v: boolean) => void;
   selected: Set<number>;
   setSelected: React.Dispatch<React.SetStateAction<Set<number>>>;
-  confirmBatch: boolean;
-  setConfirmBatch: (v: boolean) => void;
   toggleSelMode: () => void;
   toggleSel: (id: number) => void;
   selectAll: () => void;
@@ -28,11 +27,9 @@ export function useSelection<T>({
 }: UseSelectionOptions<T>): UseSelectionReturn {
   const [selMode, setSelMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [confirmBatch, setConfirmBatch] = useState(false);
 
   const reset = useCallback(() => {
     setSelected(new Set());
-    setConfirmBatch(false);
   }, []);
 
   const toggleSelMode = useCallback(() => {
@@ -64,7 +61,6 @@ export function useSelection<T>({
 
   const clearSel = useCallback(() => {
     setSelected(new Set());
-    setConfirmBatch(false);
   }, []);
 
   return {
@@ -72,8 +68,6 @@ export function useSelection<T>({
     setSelMode,
     selected,
     setSelected,
-    confirmBatch,
-    setConfirmBatch,
     toggleSelMode,
     toggleSel,
     selectAll,

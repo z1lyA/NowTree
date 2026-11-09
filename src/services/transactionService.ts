@@ -92,6 +92,20 @@ export function collectReleaseIds(
   return all.filter((id) => !ex.has(id));
 }
 
+// 1.1.6：一键清理 / 批量删除改成「点了就删 + toast 撤销」，撤销走 restoreMany。
+// 软删会向下级联后代，但 restore 不级联，所以必须**删除前**把「根 + 整棵子树」记下来
+// （删完再算，active 里已经找不到那些后代的 parent_id 关系了）。
+// 传两个集合：inbox 事务只存在于 store.inbox，不在 active 里；Inbox 虽无子项，
+// 合并查找是为了「根 id 一定在结果里」这件事不依赖调用方选哪个池子。
+export function collectUndoIds(items: Transaction[], rootIds: number[]): number[] {
+  const out = new Set<number>();
+  for (const id of rootIds) {
+    out.add(id);
+    for (const d of collectSubtreeIds(items, id)) out.add(d);
+  }
+  return [...out];
+}
+
 // A（1.1.3）：回收站「恢复」护栏——Project 子事务若其所属父事务不在 active（已删 / 已不再是
 // Project），单独恢复会变成「孤儿」（子事务只在 Project 视图渲染），应拦截，提示先恢复父事务。
 // 返回 true 表示允许单独恢复；false 表示需先恢复所属的 Project 父事务。
