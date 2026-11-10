@@ -11,6 +11,7 @@ import ShortcutsModal from "./components/ShortcutsModal";
 import ThemeModal from "./components/ThemeModal";
 import DataModal from "./components/DataModal";
 import SettingsModal from "./components/SettingsModal";
+import UpdateModal from "./components/UpdateModal";
 import Modal from "./components/common/Modal";
 import { useTxStore } from "./store/useTxStore";
 import type { TimeSlot } from "./types/transaction";
@@ -21,6 +22,9 @@ import { useShell } from "./hooks/useShell";
 import { useWeeklyReview } from "./hooks/useWeeklyReview";
 import { useDailyDigest } from "./hooks/useDailyDigest";
 import { resetStaleReminderMarksOnce } from "./utils/reminderMarks";
+import { checkForUpdate } from "./services/updateCheck";
+import type { UpdateInfo } from "./services/updateCheck";
+import type { Update } from "@tauri-apps/plugin-updater";
 import {
   useReminderScan,
   useReminderScheduler,
@@ -54,6 +58,12 @@ export default function App() {
   const [dataOpen, setDataOpen] = useState(false);
   // 0.2.0：设置弹窗（聚合所有开关类设置：开机自启动 / 勾选提示音…）
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 1.1.7：检查更新。只有真发现新版本才挂弹窗；checkingUpdate 用来挡重复点击。
+  const [updateFound, setUpdateFound] = useState<{
+    update: Update;
+    info: UpdateInfo;
+  } | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   // 1.1.5：数据就绪标记——每日摘要卡要等 active 读完再判断，避免误显示「暂无安排」。
   // 原「今日」启动弹窗已由右下角每日摘要卡接管（见 useDailyDigest），不再有自动弹窗。
   const [dataReady, setDataReady] = useState(false);
@@ -243,6 +253,27 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // 1.1.7：菜单「检查更新」。结果用 toast 报——「已是最新」弹个窗属于打扰，
+  // 只有真发现新版本才挂 UpdateModal。
+  async function handleCheckUpdate() {
+    setMenuOpen(false);
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    showToast("正在检查更新…");
+    const res = await checkForUpdate();
+    setCheckingUpdate(false);
+
+    if (res.kind === "unsupported") {
+      showToast("浏览器预览环境没有更新后端，请在安装版里检查");
+    } else if (res.kind === "latest") {
+      showToast(`已是最新版本 v${res.currentVersion}`);
+    } else if (res.kind === "failed") {
+      showToast(res.message);
+    } else {
+      setUpdateFound({ update: res.update, info: res.info });
+    }
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -328,9 +359,19 @@ export default function App() {
               >
                 ⚙ 设置
               </button>
+              {/* 1.1.7：检查更新。放在「设置」下面——同属「维护类」动作，
+                  与上面「回收站 / 快捷键 / 主题 / 数据管理」的操作类目分开。 */}
+              <button
+                className="side-menu-item"
+                onClick={() => void handleCheckUpdate()}
+                disabled={checkingUpdate}
+                title="从 GitHub 检查是否有新版本"
+              >
+                🔄 检查更新
+              </button>
               <div className="side-menu-sep" />
               <div className="side-menu-motto">种一棵树最好的时间是十年前，其次是现在</div>
-              <div className="side-menu-version">v1.1.6 · 本地 SQLite</div>
+              <div className="side-menu-version">v1.1.7 · 本地 SQLite</div>
             </div>
           )}
         </div>
@@ -450,6 +491,13 @@ export default function App() {
             </div>
           </div>
         </Modal>
+      )}
+      {updateFound && (
+        <UpdateModal
+          update={updateFound.update}
+          info={updateFound.info}
+          onClose={() => setUpdateFound(null)}
+        />
       )}
       {/* 1.1.3：拖拽删除垃圾桶——仅拖拽中显形，挂载于 App 顶层，五视图通用 */}
       <TrashDrop />

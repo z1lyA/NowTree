@@ -160,6 +160,37 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 
 `lib.rs` 拦截 `CloseRequested`：`prevent_close()` + 给前端发 `window-close-requested` 事件 → 前端弹模态确认框（最小化到托盘 / 退出 + 不再提示）。真正隐藏 / 退出由 `minimize_to_tray` / `quit_app` 命令执行。加 `tauri-plugin-single-instance` 防止双开抢同一 DB 锁。
 
+### 检查更新（1.1.7）
+
+用 Tauri 官方 `tauri-plugin-updater`。核心是「静态清单 + 签名校验」，**不碰 GitHub REST API**（因此没有 60 次/小时限流问题）。
+
+**更新源**是一个随 Release 上传的静态 JSON（`tauri.conf.json` 的 `plugins.updater.endpoints`）：
+
+```
+https://github.com/z1lyA/NowTree/releases/latest/download/latest.json
+```
+
+清单结构（`scripts/make-latest-json.ps1` 自动生成，**不要手写**）：
+
+```json
+{
+  "version": "1.1.7",
+  "notes": "发布说明前 8 行纯文本",
+  "pub_date": "2026-11-10T12:00:00Z",
+  "platforms": {
+    "windows-x86_64": { "signature": "<.sig 文件内容>", "url": "<安装包下载地址>" }
+  }
+}
+```
+
+**安全模型**：构建时用私钥（`Materials/updater/nowtree-updater.key`，gitignore）对安装包签名，产出 `.sig`；应用内只内置**公钥**（`tauri.conf.json` 的 `plugins.updater.pubkey`）。运行时插件下载安装包后会校验签名，不通过直接报错，**没有跳过校验的开关**。私钥一旦丢失或更换，已安装的用户将永久失去更新能力。
+
+**调用链**：`App.tsx` 菜单「检查更新」→ `services/updateCheck.ts#checkForUpdate`（`check({ timeout: 8000 })`，`null` 视为已是最新）→ 有更新则挂 `UpdateModal`（版本对比 / 说明 / 进度条 / 下载并安装）。安装走 `update.downloadAndInstall()`，Windows 安装器 `installMode = "passive"`，且 `restartAfterInstall` 默认 `true`，所以**装完会自动重启**，无需 `tauri-plugin-process` 的 `relaunch()`。用户点「以后再说」关闭弹窗时必须 `update.close()`，否则 Rust 侧持有的 Update 资源不释放。
+
+**失败处理**：错误文案由 `utils/updateText.ts#describeUpdateError` 按优先级分类（签名 > 超时 > 找不到 latest.json > 连不上），并且弹窗常驻「打开发布页」。原因是 WebView2 与浏览器可能走**不同代理**，「软件连不上、浏览器能打开」是最常见的失败形态。
+
+**零数据库迁移**：更新状态不落库，全部在内存里。
+
 ---
 
 ## 5. 构建与打包
@@ -172,9 +203,16 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 
 > 本机已安装 **WiX Toolset v3.14.1** 与 **NSIS**，`tauri.conf.json` 中 `targets: "all"`，所以每次构建会同时产出 MSI 安装包与 NSIS `setup.exe`。WiX v4（.NET 工具 `wix`）Tauri v2 当前用不了。
 
+**1.1.7 起多两步**（都已在 `build-release.bat` 里自动化）：
+
+1. 构建前注入 `TAURI_SIGNING_PRIVATE_KEY`（指向 `Materials/updater/nowtree-updater.key`）。没有它 `createUpdaterArtifacts` 产不出 `.sig`，应用内更新会失效。
+2. 构建后跑 `scripts/make-latest-json.ps1`，从 `tauri.conf.json` 读版本号、读 `.sig` 内容，生成 `bundle/latest.json`。**发版时必须把这个文件一起传成 Release 附件**，否则客户端检查更新会 404。
+
 ### 权限（capabilities）
 
-`src-tauri/capabilities/` 按窗口开放权限：`default.json` 给主窗口（`core:default`、`dialog`、`autostart`、`opener`），`reminder.json` 给右下角提醒窗口（`core:default`，供事件监听 / 发送）。新增 Tauri 命令若前端报权限错，先来这里加对应 `allow-*`。1.1.5 起已移除 `notification` 插件与权限。
+`src-tauri/capabilities/` 按窗口开放权限：`default.json` 给主窗口（`core:default`、`dialog`、`autostart`、`opener`、`updater`），`reminder.json` 给右下角提醒窗口（`core:default`，供事件监听 / 发送）。新增 Tauri 命令若前端报权限错，先来这里加对应 `allow-*`。1.1.5 起已移除 `notification` 插件与权限。
+
+> `updater:default` = `allow-check` / `allow-download` / `allow-install` / `allow-download-and-install` 四项，覆盖「检查 → 下载 → 安装」全流程；签名校验在 Rust 侧完成，不依赖前端。
 
 ---
 

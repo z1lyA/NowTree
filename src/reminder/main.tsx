@@ -5,6 +5,11 @@ import ReactDOM from "react-dom/client";
 import ReminderApp from "./ReminderApp";
 import "../styles/index.css";
 import "../styles/reminder.css";
+import { applyStoredTheme } from "../hooks/useTheme";
+
+// 1.1.7：与主窗口同理——首帧之前先套用主题。
+// 提醒窗口是无边框卡片，闪一下深色/浅色比主窗口更扎眼，所以这里也要提前套用。
+applyStoredTheme();
 
 ReactDOM.createRoot(document.getElementById("reminder-root") as HTMLElement).render(
   <ReminderApp />,

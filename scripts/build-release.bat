@@ -20,6 +20,16 @@ set "LIB=%SDK_LIB%\um\x64;%SDK_LIB%\ucrt\x64;%MSVC_LIB%"
 
 cd /d "%~dp0.."
 
+REM === 1.1.7: updater signing key (required for in-app updates) ===
+REM The updater verifies installers with the pubkey embedded in tauri.conf.json.
+REM Without this env var, tauri build emits no .sig and make-latest-json.ps1 will fail.
+set "TAURI_SIGNING_PRIVATE_KEY=%CD%\Materials\updater\nowtree-updater.key"
+set "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
+if not exist "%TAURI_SIGNING_PRIVATE_KEY%" (
+    echo [NowTree] WARNING: updater private key missing: %TAURI_SIGNING_PRIVATE_KEY%
+    echo [NowTree] WARNING: build will produce NO .sig, in-app updates will not work.
+)
+
 REM 仅在 source.png 相对上次提交有变动时才重生成图标，
 REM 避免每次打包都触发 tauri icon 导致 icon.icns 产生无意义的字节伪差异（见 git 历史）。
 set "SRC=src-tauri\icons\source.png"
@@ -40,5 +50,11 @@ if exist "%SRC%" (
 echo [NowTree] building release package (this takes a few minutes)...
 call npm run tauri build
 echo [NowTree] done. Installer is in src-tauri\target\release\bundle\
+
+REM === 1.1.7: generate latest.json (updater manifest) for the GitHub Release ===
+if exist "%~dp0make-latest-json.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0make-latest-json.ps1"
+    if errorlevel 1 echo [NowTree] WARNING: latest.json generation failed.
+)
 
 endlocal

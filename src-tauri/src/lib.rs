@@ -64,6 +64,12 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_main(app);
         }))
+        // 1.1.7：应用内检查更新。
+        // 更新源是 GitHub Release 上的静态 latest.json（见 tauri.conf.json 的 endpoints）；
+        // 安装包必须由私钥签名，运行时用 pubkey 校验，校验不通过一律拒绝安装。
+        // 不注册 tauri-plugin-process：Windows 安装器装完会自动重启应用
+        // （InstallOptions.restartAfterInstall 默认 true），无需前端 relaunch()。
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
             let db = Db::new(&handle).expect("failed to open database");
@@ -117,6 +123,8 @@ pub fn run() {
             commands::import_data,
             commands::get_autostart,
             commands::set_autostart,
+            // 1.1.7：系统深浅色（WebView2 的 prefers-color-scheme 不可信，改由注册表读）
+            commands::get_system_theme,
             commands::minimize_to_tray,
             commands::quit_app,
             commands::read_backup_meta,

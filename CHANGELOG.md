@@ -4,6 +4,52 @@
 
 ---
 
+## 1.1.7（2026-11-10）
+
+本次为**一项新功能**：左下角菜单新增「检查更新」，走 Tauri 官方 `tauri-plugin-updater` 直连 GitHub Releases——比对版本、显示发布说明、下载安装包，**校验签名后**自动安装并在装完自动重启。附带把 `README.md` 按「普通使用者优先」整篇重排（补上原本完全缺失的用法说明与「快速上手」）。**零数据库迁移**。
+
+### 新功能：检查更新（应用内升级）
+- **入口**：左下角 ☰ 菜单 →「设置」下方新增「🔄 检查更新」。没发现新版本时只弹一条 toast「已是最新版本 v1.1.7」，不弹窗打扰；`checkingUpdate` 挡住重复点击。
+- **发现新版本**：弹「发现新版本」卡片，写明 `旧版本 → 新版本`、发布日期与 Release 说明（最多 8 行），三个动作：「打开发布页」/「以后再说」/「下载并安装」。
+- **安装**：下载过程显示进度条；下载完由 updater 校验签名，通过后交给 Windows 安装器（`installMode = passive`：小进度窗、无需交互）。安装器默认 `restartAfterInstall = true`，会先退出 NowTree、装完自动重启——因此**没有**引入 `tauri-plugin-process`，也不需要前端 `relaunch()`。
+- **安全模型**：安装包必须由私钥签名，应用内只内置**公钥**（`tauri.conf.json` 的 `plugins.updater.pubkey`）；签名对不上一律拒绝安装，不存在「跳过校验」的开关。
+- **失败兜底**：错误文案按原因分类（签名不符 / 超时 / 找不到 latest.json / 连不上），并始终提供「打开发布页」。原因是浏览器与 WebView2 可能走**不同代理**——「软件连不上、浏览器却能打开」是最常见的失败形态。
+- **联网边界**：只在用户主动点「检查更新」时请求一次静态清单，不上传任何本地数据；不联网时软件其余功能完全不受影响。
+
+### 优化：README 整篇重排（面向普通使用者）
+- 开头改为「一句话定位 → 一句话用法 → 五个视图地图」，并补上原本完全缺失的「怎么用」四节：先记下来 / 整理成下一步 / 按早午晚推进 / 完成与回顾。
+- 新增「快速上手」三步（装 / 记 / 排），下载直连 `/releases/latest`，不再写死版本号；原「快速开始」实际是「装 Rust 工具链」的开发者指南，已降级为「项目与源码」。
+- 修掉过期事实：产物名写死 `1.1.3`、目录树根名 `NowTree开发/`、截图区的版本沿革说明；标题 emoji 全部去掉。
+
+### 修复：「跟随系统」永远显示浅色（即使系统是深色）
+- **现象**：主题选「跟随系统」时，Windows 明明是深色，NowTree 却启动成浅色；改系统主题也不跟。
+- **根因**：`useTheme` 用 `window.matchMedia("(prefers-color-scheme: light)")` 判断系统色。实测在 Tauri 的 WebView2 窗口里，这个媒体查询**恒定返回 true**，与 Windows 的深色设置无关——所以「跟随系统」被锁死在浅色。已核对：`localStorage` 里的模式确实是 `system`，Windows 注册表 `AppsUseLightTheme = 0`（深色），两者都对，只有媒体查询在说谎。
+- **修法**：新增 Rust 命令 `get_system_theme()`（`commands.rs`），直接读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`（0 = 深色），前端 `invoke` 拿结果自己写 `data-theme`，**不再经过 WebView2 的媒体查询**。浏览器预览没有 IPC 时才退回媒体查询。CSS 本来就没有任何 `prefers-color-scheme` 媒体查询，主题完全由 `data-theme` 驱动，所以这一处改动就够。
+- **跟随变化**：注册表没有可订阅的变更事件，改为在 `system` 模式下每 20 秒复查一次（一次注册表读取，开销可忽略）；切到 `light` / `dark` 后定时器自动停掉。提醒窗口在重新显示时也会刷新一次系统色。
+
+### 修复：启动时闪一下深色
+- **问题**：`styles/index.css` 里 `:root` 的主题变量默认就是深色，浅色靠 `:root[data-theme="light"]` 覆盖；而 `useTheme` 原本在 `useEffect` 里才写 `data-theme`——那时首帧已经画完。系统设为**浅色**的用户每次启动会先闪一帧深色再变白，提醒窗口同理。
+- **现在**：`src/main.tsx` 与 `src/reminder/main.tsx` 在 `render()` 之前各调用一次 `applyStoredTheme()`；它用「上次读到的系统色」做首帧上色（`nowtree.systemTheme` 缓存），随后再由 `refreshSystemTheme()` 异步纠正。这样既不会闪，也不会因为 IPC 是异步而画错颜色。
+- **顺带确认**：默认值本来就已经是 `system`（`useTheme.ts` 的 `?? "system"`），新装用户无需任何设置即为跟随系统；**已手动选过深色 / 浅色的用户不受影响**（尊重既有选择，需要改回跟随系统请到「主题」里重选）。
+
+### 工程
+- 新增：`src/utils/updateText.ts`（发布说明截断 / 日期格式化 / 错误文案翻译）、`src/services/updateCheck.ts`（插件调用与错误翻译收口）、`src/components/UpdateModal.tsx`、`src/utils/updateText.test.ts`、`scripts/make-latest-json.ps1`（生成 updater 清单）。
+- 修改：`src/App.tsx`（菜单项 / 状态 / 弹窗挂载 / 版本号）、`src/styles/index.css`（`.update-notes` / `.update-progress`）、`src-tauri/Cargo.toml`、`src-tauri/src/lib.rs`（注册 updater 插件 / 注册 `get_system_theme`）、`src-tauri/src/commands.rs`（`get_system_theme`）、`src-tauri/tauri.conf.json`（`createUpdaterArtifacts` / `endpoints` / `pubkey` / `installMode`）、`src-tauri/capabilities/default.json`（`updater:default`）、`scripts/build-release.bat`（注入签名私钥 + 构建后自动生成 latest.json）。
+- 主题重构：`src/hooks/useTheme.ts`（系统色改由 `get_system_theme` 读取，加 `nowtree.systemTheme` 首帧缓存与 20 秒复查）、`src/main.tsx` 与 `src/reminder/main.tsx`（`render()` 前先上色）、`src/reminder/ReminderApp.tsx`（重新显示时异步刷新系统色）。
+- 依赖：新增 `tauri-plugin-updater`（Rust）、`@tauri-apps/plugin-updater`、`@tauri-apps/plugin-opener`（前端）。
+- **前端 Tauri 包改为精确版本**：`@tauri-apps/api@2.11.1` / `@tauri-apps/plugin-opener@2.5.4` / `@tauri-apps/plugin-updater@2.12.0`，与 Rust 侧 crate 的 minor 对齐。`tauri build` 会校验 npm 包与 crate 的 major/minor 是否一致，不一致直接拒绝构建；用 `^` 范围会被 `npm install` 顶到更高 minor 从而构建失败。
+- 版本号四处（`package.json` / `tauri.conf.json` / `Cargo.toml` / `App.tsx`）升至 `1.1.7`。
+- 测试：`tsc --noEmit` 0 错；`vitest run` 132 项全部通过（新增 12 项：发布说明截断 / 换行归一 / 日期格式化 / 错误文案分类优先级）。
+
+### 已知限制
+- **1.1.6 及更早的安装包收不到应用内更新**：那些版本没有内置公钥，只能手动下载 1.1.7 覆盖安装一次，之后才能走应用内升级。
+- **签名私钥必须长期保管**：私钥存于 `Materials/updater/`（已 gitignore）。一旦丢失或更换，**已经装了 1.1.7+ 的用户就再也收不到更新**。
+- **发版多一步**：除 `.exe` / `.msi` 外，必须把 `latest.json` 一并传为 Release 附件，否则检查更新会报「找不到 latest.json」。
+- **国内网络**：`github.com` 在部分网络下不通，检查更新会失败（有「打开发布页」兜底）。
+- `api.github.com` 未使用，更新清单直接走 `releases/latest/download/latest.json`，不受 REST API 的 60 次/小时限流影响。
+
+---
+
 ## 1.1.6（2026-11-09）
 
 本次为**三处交互优化**：① 四个列表视图（Next / Projects / Waiting / Someday）的「一键清理」不再二次确认，点一下直接清理，底部提示条显示清理数量并给 5 秒「撤销」；② 回收站「清空回收站」改成弹窗二次确认（不可恢复的操作不再让按钮自己变形）；③ 所有弹窗不再「点遮罩关闭」，避免误点空白丢掉已填写内容。**零数据库迁移**。

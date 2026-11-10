@@ -843,3 +843,39 @@ body.dragging-active .dropdown-menu {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+
+/* ===== 1.1.7：检查更新弹窗 ===== */
+/* 发布说明保留原始换行（见 utils/updateText.ts 的 clampNotes），
+   字体沿用界面字体而不是等宽，避免中文等宽后变得很散。 */
+.update-notes {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.update-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.update-progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .18);
+  border: 1px solid var(--border);
+}
+
+.update-progress-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width .15s linear;
+}

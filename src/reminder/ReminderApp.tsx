@@ -25,7 +25,7 @@ import type { ReminderCard } from "../services/reminderCards";
 import { mergeCards, removeCard } from "../services/reminderCards";
 import { snoozeTargetValue } from "../services/reminders";
 import { getReminderPrefs } from "../utils/reminderPrefs";
-import { useTheme, applyStoredTheme } from "../hooks/useTheme";
+import { useTheme, refreshSystemTheme } from "../hooks/useTheme";
 import { TIME_SLOT_LABELS } from "../types/transaction";
 
 const KIND_LABELS: Record<string, string> = {
@@ -83,7 +83,9 @@ export default function ReminderApp() {
   // 提醒窗口是常驻复用的，主窗口期间改过主题它不会自动重渲染。
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === "visible") applyStoredTheme();
+      // 1.1.7：改成异步刷新系统色——隐藏期间用户可能改过系统主题，
+      // 只套缓存会把旧颜色带出来。
+      if (document.visibilityState === "visible") void refreshSystemTheme();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);

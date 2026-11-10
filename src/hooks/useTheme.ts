@@ -1,50 +1,101 @@
-// 应用主题（0.1.19 从 App 抽离）：light/dark 直接生效；system 跟随系统并监听变化。
-// 返回当前 theme 与 chooseTheme 切换函数。
+// 应用主题：light / dark 直接生效；system 跟随系统深浅色。
+//
+// 1.1.7：系统色不再以 CSS 媒体查询为准。
+// 实测（WebView2 + 本机深色模式）：Tauri 窗口里 window.matchMedia("(prefers-color-scheme: light)")
+// 恒定返回 true，跟 Windows 的深色设置毫无关系 —— 于是「跟随系统」永远落在浅色，
+// 这就是「系统是深色但启动却是浅色」的根因。
+// 现在改为 invoke("get_system_theme")，由 Rust 读注册表 AppsUseLightTheme；
+// 媒体查询只在浏览器预览（没有 IPC）时兜底。
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 export type ThemeMode = "light" | "dark" | "system";
-const THEME_KEY = "nowtree.theme";
 
-function applyTheme(mode: ThemeMode) {
-  const root = document.documentElement;
-  const mq = window.matchMedia("(prefers-color-scheme: light)");
-  const eff: "light" | "dark" =
-    mode === "system" ? (mq.matches ? "light" : "dark") : mode;
-  root.dataset.theme = eff;
+const THEME_KEY = "nowtree.theme";
+// 上一次读到的系统深浅色。只服务于「启动首帧」：让 system 模式不必等异步 IPC 就能上色，
+// 否则每次启动都会先按兜底值画一帧再纠正（闪一下）。真正生效以 resolveSystemTheme() 为准。
+const SYS_KEY = "nowtree.systemTheme";
+
+// 复查系统色的间隔。WebView2 的 matchMedia change 事件在本项目里不可靠，
+// 注册表又没有可订阅的变更事件，只能轮询——一次注册表读取，开销可忽略。
+const SYSTEM_POLL_MS = 20_000;
+
+function mediaTheme(): "light" | "dark" {
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-// 1.1.5：按 localStorage 的当前设置重新套用主题。
-// 供「常驻但可能被隐藏」的提醒窗口在重新显示时同步主窗口刚改过的主题（弹窗单独一个窗口，不会随主窗口重渲染）。
+function storedMode(): ThemeMode {
+  return (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
+}
+
+function cachedSystemTheme(): "light" | "dark" | null {
+  const v = localStorage.getItem(SYS_KEY);
+  return v === "dark" || v === "light" ? v : null;
+}
+
+// 唯一真正碰 DOM 的地方：主题只由 data-theme 驱动（CSS 里没有任何 prefers-color-scheme 媒体查询）。
+function paint(mode: ThemeMode, systemTheme: "light" | "dark") {
+  document.documentElement.dataset.theme = mode === "system" ? systemTheme : mode;
+}
+
+/** 读系统深浅色：优先问 Rust（注册表）；浏览器预览 / 命令失败时退回媒体查询。 */
+export async function resolveSystemTheme(): Promise<"light" | "dark"> {
+  let theme: "light" | "dark" | null = null;
+  try {
+    const t = await invoke<string>("get_system_theme");
+    if (t === "dark" || t === "light") theme = t;
+  } catch {
+    // 浏览器预览没有 IPC，或是旧后端：交给下面的兜底
+  }
+  const resolved = theme ?? mediaTheme();
+  localStorage.setItem(SYS_KEY, resolved);
+  return resolved;
+}
+
+/**
+ * 按「本地偏好 → 缓存/兜底系统色」同步上色。
+ * 主窗口与提醒窗口的入口都在 render() 之前调用它，保证首帧颜色就是对的。
+ */
 export function applyStoredTheme() {
-  const mode = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
-  applyTheme(mode);
+  paint(storedMode(), cachedSystemTheme() ?? mediaTheme());
+}
+
+/** 读真实系统色并套用，返回读到的值。用于启动后的纠正与轮询复查。 */
+export async function refreshSystemTheme(): Promise<"light" | "dark"> {
+  const sys = await resolveSystemTheme();
+  paint(storedMode(), sys);
+  return sys;
 }
 
 export function useTheme() {
-  const [theme, setTheme] = useState<ThemeMode>(
-    () => (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system",
+  const [theme, setTheme] = useState<ThemeMode>(storedMode);
+  const [systemTheme, setSystemTheme] = useState<"light" | "dark">(
+    () => cachedSystemTheme() ?? mediaTheme(),
   );
 
-  // 跟随 theme 变化应用；首次挂载也应用（读到的本地值 / 默认 system）。
+  // 启动后纠正一次：缓存可能已经过期（比如用户刚在系统设置里换了主题）。
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  // system 模式下监听系统配色变化，自动重应用。
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: light)");
-    const onChange = () => {
-      const cur = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
-      if (cur === "system") applyTheme("system");
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    void refreshSystemTheme().then(setSystemTheme);
   }, []);
+
+  // 模式或系统色变了就重绘。
+  useEffect(() => {
+    paint(theme, systemTheme);
+  }, [theme, systemTheme]);
+
+  // 仅在 system 模式下轮询复查，避免 light / dark 用户白白多跑定时器。
+  useEffect(() => {
+    if (theme !== "system") return;
+    const id = window.setInterval(() => {
+      void refreshSystemTheme().then(setSystemTheme);
+    }, SYSTEM_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [theme]);
 
   function chooseTheme(mode: ThemeMode) {
     localStorage.setItem(THEME_KEY, mode);
     setTheme(mode);
-    applyTheme(mode);
+    paint(mode, systemTheme);
   }
 
   return { theme, chooseTheme };

@@ -683,3 +683,44 @@ pub fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+// ---- 系统主题（1.1.7） ----
+// 为什么要有这个命令，而不是用 CSS 的 prefers-color-scheme：
+// 本项目实测（WebView2 + 本机深色模式），window.matchMedia("(prefers-color-scheme: light)")
+// 在 Tauri 窗口里恒定返回 true，跟系统设置无关 —— 于是「跟随系统」永远落在浅色。
+// 注册表 HKCU\...\Themes\Personalize\AppsUseLightTheme 是 Windows 自己判定应用深浅色用的值
+// （0 = 深色，1 = 浅色），前端拿它自己写 data-theme，就不再经过 WebView2 的媒体查询。
+#[tauri::command]
+pub fn get_system_theme() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::w;
+        use windows::Win32::System::Registry::{
+            RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD,
+        };
+
+        // 读不到时按浅色处理：与 Windows 默认值一致，也是「跟随系统」最不刺眼的降级。
+        let mut value: u32 = 1;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+                w!("AppsUseLightTheme"),
+                RRF_RT_REG_DWORD,
+                None,
+                Some(&mut value as *mut u32 as *mut core::ffi::c_void),
+                Some(&mut size),
+            )
+        };
+        // 非零返回码统一当作读失败，走上面的浅色默认值。
+        if rc.0 == 0 && value == 0 {
+            return "dark".to_string();
+        }
+        "light".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "light".to_string()
+    }
+}
+
