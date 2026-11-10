@@ -37,21 +37,28 @@ if (-not (Test-Path $sigPath)) {
     throw "找不到签名文件：$sigPath`n请确认构建时设置了 TAURI_SIGNING_PRIVATE_KEY_PATH，且 createUpdaterArtifacts = true"
 }
 
-# 发布说明：取 Release notes 的前几行，去掉 markdown 记号后压成纯文本。
-# 必须显式 -Encoding UTF8：PS 5.1 的默认编码是 ANSI，读 UTF-8 的 md 会整段乱码。
-# updater 弹窗只显示 8 行，塞整篇会撑爆弹窗，所以这里限行 + 限长。
+# 发布说明：只取 Release notes 里 `---` 之前的「本次总述」，压成纯文本。
+#
+# 为什么不取全文：弹窗只有一屏，塞进「新功能 / 优化 / 工程」等分节会撑爆，
+# 那些细节属于发布页，需要的人点「打开发布页」去看。
+# 为什么必须 -Encoding UTF8：PS 5.1 默认按 ANSI 读，UTF-8 的 md 会整段乱码。
+# 顺便去掉 markdown 记号（`**` / 反引号 / 标题符号）——弹窗不渲染 markdown，
+# 留着会原样显示成 `README.md` 这种。
 $notes = ''
 $notesFile = Join-Path $root "Materials\release_notes\RELEASE_NOTES_v$version.md"
 if (Test-Path $notesFile) {
-    $lines = Get-Content $notesFile -Encoding UTF8 |
-        ForEach-Object { ($_ -replace '\*\*', '') -replace '^\s*[#>*\-]+\s*', '' } |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -ne '' } |
-        Select-Object -First 8
-    $notes = $lines -join "`n"
-    if ($notes.Length -gt 420) {
-        $notes = $notes.Substring(0, 420) + '…'
+    $summary = @()
+    foreach ($line in (Get-Content $notesFile -Encoding UTF8)) {
+        $t = $line.Trim()
+        if ($t -eq '---') { break }                       # 总述到此结束
+        if ($t -match '^#{1,6}\s') { continue }           # 跳过 markdown 标题（标题已在弹窗头部显示）
+        $t = ($t -replace '\*\*', '') -replace '`', ''
+        $t = $t -replace '^\s*[>*\-]+\s*', ''
+        $t = $t.Trim()
+        if ($t -ne '') { $summary += $t }
     }
+    $notes = ($summary | Select-Object -First 5) -join "`n"
+    if ($notes.Length -gt 300) { $notes = $notes.Substring(0, 300) + '…' }
 }
 
 # 下载地址必须与 Release 附件名**完全一致**（AGENTS.md 的发布流程用的是这个文件名）。
