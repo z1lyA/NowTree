@@ -869,7 +869,8 @@ body.dragging-active .dropdown-menu {
   height: 6px;
   border-radius: 3px;
   overflow: hidden;
-  background: rgba(0, 0, 0, .18);
+  /* 轨道用主题变量：写死 rgba(0,0,0,.18) 在深色主题下会糊成一片灰，浅色主题又偏重 */
+  background: var(--bg-input);
   border: 1px solid var(--border);
 }
 

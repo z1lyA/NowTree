@@ -34,7 +34,10 @@ if (-not (Test-Path $setup)) {
     throw "找不到安装包：$setup`n请先运行 scripts\build-release.bat"
 }
 if (-not (Test-Path $sigPath)) {
-    throw "找不到签名文件：$sigPath`n请确认构建时设置了 TAURI_SIGNING_PRIVATE_KEY_PATH，且 createUpdaterArtifacts = true"
+    # 提示要与 build-release.bat 实际注入的变量名一致：它用的是 TAURI_SIGNING_PRIVATE_KEY
+    # （直接放密钥内容，见该脚本第 26 行），不是 *KEY_PATH。写错变量名会让人对着一个
+    # 根本不存在的设置排查半天。
+    throw "找不到签名文件：$sigPath`n请确认构建时设置了 TAURI_SIGNING_PRIVATE_KEY（scripts\build-release.bat 会自动注入），且 createUpdaterArtifacts = true"
 }
 
 # 发布说明：只取 Release notes 里 `---` 之前的「本次总述」，压成纯文本。
