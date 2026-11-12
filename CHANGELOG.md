@@ -4,6 +4,33 @@
 
 ---
 
+## 1.1.8（2026-11-12）
+
+本次为 **1.1.7 的补漏与收口**，没有新功能：把「检查更新」里几处承诺没兑现、口径对不上的地方补齐，顺手把三份重复的环境判断与插件调用收进 service。**零数据库迁移**，不动表结构。
+
+### 修复
+- **检查更新失败时没有「打开发布页」入口**：1.1.7 的文案承诺「出错时始终能打开发布页」，实际只在弹窗里（即已发现新版本、安装失败时）才有；光检查就失败的话只闪一条 2 秒的 toast，什么也点不了。现在失败 toast 上直接挂「打开发布页」按钮（带动作的 toast 停留 5 秒）。这正好是最常见的失败形态——代理只对浏览器生效、软件连不上 GitHub。
+- **发布说明显示行数三处口径不一致**：弹窗常量是「最多 8 行」，实现却在 8 行正文后**追加**一行省略号（实际渲染 9 行）；而 `make-latest-json.ps1` 又在生成清单时先截到 5 行 / 300 字，8 行永远走不到；文档里还写着「前 8 行」。现在统一为：**清单存完整总述**（只去掉 markdown 记号），**显示行数只由弹窗决定**——最多 8 行，被截断时最后一行是省略号。
+- **证书错误被误译成「安装包签名校验没通过」**：错误分类里签名分支排在前面且正则包含 `verification`，于是代理 / 中间人导致的 `certificate verification failed` 会被说成「更新包被篡改，已拒绝安装」。现在证书 / TLS 单独成一类并排在签名之前，文案改为提示检查代理。
+- **发版脚本报错指向不存在的环境变量**：`make-latest-json.ps1` 找不到 `.sig` 时提示设置 `TAURI_SIGNING_PRIVATE_KEY_PATH`，而 `build-release.bat` 实际注入的是 `TAURI_SIGNING_PRIVATE_KEY`（值直接是密钥内容）。照着错提示排查会走进死路，已改正。
+- **进度条轨道写死颜色**：`.update-progress-bar` 用的是 `rgba(0, 0, 0, .18)`，深色主题下糊成一片灰；改用主题变量 `--bg-input`，深浅主题都跟着走。
+
+### 工程
+- 新增 `src/utils/isTauri.ts`：原先 `data/index.ts` 与 `services/reminders.ts`、`services/updateCheck.ts` 各抄了一份环境判据，现在只留一处。
+- `src/utils/updateText.ts` 新增 `errorText()`：把 catch 到的 `unknown` 统一成可展示文本，检查更新与下载安装共用；`describeUpdateError()` 调整分类顺序并补测试。
+- `src/services/updateCheck.ts`：新增 `AvailableUpdate`（插件句柄 + 展示信息，两者永远成对）、`installUpdate()`（把插件的 Started / Progress / Finished 归一成「进度 + 进入安装」两个回调，错误抛出前已翻成中文）；`CheckUpdateResult` 的 available 分支改为 `{ kind: "available"; available }`。
+- `src/components/UpdateModal.tsx`：不再直接驱动插件，只保留阶段 / 进度 state 与展示；props 由 `update` + `info` 合并为单个 `available`。
+- `src/hooks/useTheme.ts`：新增 `SystemTheme` 类型与 `asSystemTheme()` 守卫，缓存值与 Rust 返回值走同一道校验；首帧上色的原因说明收到 `applyStoredTheme()` 的文档注释里，`main.tsx` / `reminder/main.tsx` 只留一行。
+- 版本号四处（`package.json` / `tauri.conf.json` / `Cargo.toml` / `App.tsx`）升至 `1.1.8`。
+- 测试：`tsc --noEmit` 0 错；`vitest run` **136 项全部通过**（新增 4 项：截断总行数恰好等于上限、证书错误不误判为签名、正好等于上限时不动、`errorText` 两种入参）；`npm run build` 双入口通过。
+
+### 已知限制
+- **1.1.6 及更早的安装包收不到应用内更新**（与 1.1.7 相同）：那些版本没有内置公钥，需手动覆盖安装一次。
+- **发版仍必须带 `latest.json` 附件**，缺了会报「找不到 latest.json」。
+- 「检查更新」依赖 GitHub 可达；部分网络下需要给软件单独配代理。
+
+---
+
 ## 1.1.7（2026-11-10）
 
 本次为**一项新功能**：左下角菜单新增「检查更新」，走 Tauri 官方 `tauri-plugin-updater` 直连 GitHub Releases——比对版本、显示发布说明、下载安装包，**校验签名后**自动安装并在装完自动重启。附带把 `README.md` 按「普通使用者优先」整篇重排（补上原本完全缺失的用法说明与「快速上手」）。**零数据库迁移**。

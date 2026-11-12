@@ -174,8 +174,8 @@ https://github.com/z1lyA/NowTree/releases/latest/download/latest.json
 
 ```json
 {
-  "version": "1.1.7",
-  "notes": "发布说明前 8 行纯文本",
+  "version": "1.1.8",
+  "notes": "发布说明总述（纯文本；弹窗最多显示 8 行，超出加省略号）",
   "pub_date": "2026-11-10T12:00:00Z",
   "platforms": {
     "windows-x86_64": { "signature": "<.sig 文件内容>", "url": "<安装包下载地址>" }
@@ -185,9 +185,9 @@ https://github.com/z1lyA/NowTree/releases/latest/download/latest.json
 
 **安全模型**：构建时用私钥（`Materials/updater/nowtree-updater.key`，gitignore）对安装包签名，产出 `.sig`；应用内只内置**公钥**（`tauri.conf.json` 的 `plugins.updater.pubkey`）。运行时插件下载安装包后会校验签名，不通过直接报错，**没有跳过校验的开关**。私钥一旦丢失或更换，已安装的用户将永久失去更新能力。
 
-**调用链**：`App.tsx` 菜单「检查更新」→ `services/updateCheck.ts#checkForUpdate`（`check({ timeout: 8000 })`，`null` 视为已是最新）→ 有更新则挂 `UpdateModal`（版本对比 / 说明 / 进度条 / 下载并安装）。安装走 `update.downloadAndInstall()`，Windows 安装器 `installMode = "passive"`，且 `restartAfterInstall` 默认 `true`，所以**装完会自动重启**，无需 `tauri-plugin-process` 的 `relaunch()`。用户点「以后再说」关闭弹窗时必须 `update.close()`，否则 Rust 侧持有的 Update 资源不释放。
+**调用链**：`App.tsx` 菜单「检查更新」→ `services/updateCheck.ts#checkForUpdate`（`check({ timeout: 8000 })`，`null` 视为已是最新）→ 有更新则挂 `UpdateModal`（版本对比 / 说明 / 进度条 / 下载并安装）。安装走 `services/updateCheck.ts#installUpdate`（内部是 `update.downloadAndInstall()`，把插件的 Started / Progress / Finished 归一成「进度 + 进入安装」两个回调，错误在抛出前已翻成中文）；组件只负责显示，不知道插件事件形状。Windows 安装器 `installMode = "passive"`，且 `restartAfterInstall` 默认 `true`，所以**装完会自动重启**，无需 `tauri-plugin-process` 的 `relaunch()`。用户点「以后再说」关闭弹窗时必须 `update.close()`，否则 Rust 侧持有的 Update 资源不释放。
 
-**失败处理**：错误文案由 `utils/updateText.ts#describeUpdateError` 按优先级分类（签名 > 超时 > 找不到 latest.json > 连不上），并且弹窗常驻「打开发布页」。原因是 WebView2 与浏览器可能走**不同代理**，「软件连不上、浏览器能打开」是最常见的失败形态。
+**失败处理**：错误文案由 `utils/updateText.ts#describeUpdateError` 按优先级分类（证书 / TLS > 签名 > 超时 > 找不到 latest.json > 其他网络），并且「打开发布页」始终可达——弹窗里是常驻按钮，检查失败时挂在 toast 上（带动作的 toast 停留 5 秒）。证书类必须排在签名之前：`certificate verification failed` 也含 `verification`，先命中签名分支会把「网络被拦」说成「安装包被篡改」。原因是 WebView2 与浏览器可能走**不同代理**，「软件连不上、浏览器能打开」是最常见的失败形态。
 
 **零数据库迁移**：更新状态不落库，全部在内存里。
 
