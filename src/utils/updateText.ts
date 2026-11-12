@@ -5,11 +5,13 @@
 // 发布说明最多显示几行。弹窗里塞整篇 CHANGELOG 反而没人读，剩下的引导去发布页看。
 export const NOTES_MAX_LINES = 8;
 
-// 发布说明截断：超出 maxLines 时保留前 maxLines 行并加省略号。
+// 发布说明截断：最多显示 maxLines 行，被截断时最后一行是省略号。
+// 「最多 maxLines 行」是总行数——省略号也占一行。把省略号追加在 maxLines 行正文之后
+// 会渲染出 maxLines+1 行，弹窗高度跟着抖一下，和常量名也对不上。
 export function clampNotes(notes: string, maxLines = NOTES_MAX_LINES): string {
   const lines = notes.replace(/\r\n/g, "\n").trimEnd().split("\n");
   if (lines.length <= maxLines) return lines.join("\n");
-  return lines.slice(0, maxLines).join("\n") + "\n…";
+  return lines.slice(0, maxLines - 1).join("\n") + "\n…";
 }
 
 // RFC 3339（如 2026-11-10T12:34:56Z）→ 2026-11-10。
@@ -27,10 +29,15 @@ export function errorText(e: unknown): string {
 }
 
 // 把插件 / 网络层抛出的英文错误翻成「用户看完知道下一步做什么」的中文。
-// 判断顺序有讲究：签名错误优先级最高（它意味着包里东西不对，不是网络问题）。
+// 判断顺序有讲究：证书类必须排在签名之前。代理 / 中间人导致的
+// "certificate verification failed" 也含 verification，若先命中签名分支，
+// 就会把「网络被拦」说成「安装包被篡改」，比原错误更吓人、还会误导用户去怀疑官方包。
 export function describeUpdateError(raw: string): string {
   const s = raw.toLowerCase();
 
+  if (/certificate|tls|ssl/.test(s)) {
+    return "连不上 GitHub（TLS 证书校验没通过）。检查网络，或确认代理对 NowTree 生效——浏览器能打开 GitHub，不代表它也走同一条代理。";
+  }
   if (/signature|pubkey|public key|verify|verification/.test(s)) {
     return "更新包签名校验没通过，已拒绝安装。通常是 latest.json 里的 signature 和实际安装包对不上。";
   }

@@ -57,8 +57,9 @@ if (Test-Path $notesFile) {
         $t = $t.Trim()
         if ($t -ne '') { $summary += $t }
     }
-    $notes = ($summary | Select-Object -First 5) -join "`n"
-    if ($notes.Length -gt 300) { $notes = $notes.Substring(0, 300) + '…' }
+    # 这里不截断行数与字数：清单保持完整总述，显示几行由弹窗决定（前端 updateText.clampNotes）。
+    # 两处都截会出现两个「最多几行」的口径，改一处忘另一处就是线上不一致。
+    $notes = $summary -join "`n"
 }
 
 # 下载地址必须与 Release 附件名**完全一致**（AGENTS.md 的发布流程用的是这个文件名）。

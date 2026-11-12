@@ -22,7 +22,7 @@ import { useShell } from "./hooks/useShell";
 import { useWeeklyReview } from "./hooks/useWeeklyReview";
 import { useDailyDigest } from "./hooks/useDailyDigest";
 import { resetStaleReminderMarksOnce } from "./utils/reminderMarks";
-import { checkForUpdate } from "./services/updateCheck";
+import { checkForUpdate, openReleasesPage } from "./services/updateCheck";
 import type { AvailableUpdate } from "./services/updateCheck";
 import {
   useReminderScan,
@@ -264,7 +264,12 @@ export default function App() {
     } else if (res.kind === "latest") {
       showToast(`已是最新版本 v${res.currentVersion}`);
     } else if (res.kind === "failed") {
-      showToast(res.message);
+      // 失败时把「打开发布页」直接挂在 toast 上：软件连不上、浏览器却能打开是最常见的失败形态，
+      // 不给出口的话用户只能自己去搜发布页。useToast 带动作会停留 5 秒，够点。
+      showToast(res.message, {
+        label: "打开发布页",
+        onClick: () => void openReleasesPage(),
+      });
     } else {
       setUpdateFound(res.available);
     }
