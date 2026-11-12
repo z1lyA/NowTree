@@ -23,8 +23,7 @@ import { useWeeklyReview } from "./hooks/useWeeklyReview";
 import { useDailyDigest } from "./hooks/useDailyDigest";
 import { resetStaleReminderMarksOnce } from "./utils/reminderMarks";
 import { checkForUpdate } from "./services/updateCheck";
-import type { UpdateInfo } from "./services/updateCheck";
-import type { Update } from "@tauri-apps/plugin-updater";
+import type { AvailableUpdate } from "./services/updateCheck";
 import {
   useReminderScan,
   useReminderScheduler,
@@ -59,10 +58,7 @@ export default function App() {
   // 0.2.0：设置弹窗（聚合所有开关类设置：开机自启动 / 勾选提示音…）
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 1.1.7：检查更新。只有真发现新版本才挂弹窗；checkingUpdate 用来挡重复点击。
-  const [updateFound, setUpdateFound] = useState<{
-    update: Update;
-    info: UpdateInfo;
-  } | null>(null);
+  const [updateFound, setUpdateFound] = useState<AvailableUpdate | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   // 1.1.5：数据就绪标记——每日摘要卡要等 active 读完再判断，避免误显示「暂无安排」。
   // 原「今日」启动弹窗已由右下角每日摘要卡接管（见 useDailyDigest），不再有自动弹窗。
@@ -270,7 +266,7 @@ export default function App() {
     } else if (res.kind === "failed") {
       showToast(res.message);
     } else {
-      setUpdateFound({ update: res.update, info: res.info });
+      setUpdateFound(res.available);
     }
   }
 
@@ -494,8 +490,7 @@ export default function App() {
       )}
       {updateFound && (
         <UpdateModal
-          update={updateFound.update}
-          info={updateFound.info}
+          available={updateFound}
           onClose={() => setUpdateFound(null)}
         />
       )}

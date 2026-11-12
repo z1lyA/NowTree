@@ -20,6 +20,12 @@ export function formatReleaseDate(iso?: string): string {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : "";
 }
 
+// 统一把 catch 到的 unknown 变成可展示文本。放在这里是因为检查更新（service）
+// 与下载安装（原本在组件里）两处都要用，各写一份必然会有一处漏掉非 Error 的分支。
+export function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 // 把插件 / 网络层抛出的英文错误翻成「用户看完知道下一步做什么」的中文。
 // 判断顺序有讲究：签名错误优先级最高（它意味着包里东西不对，不是网络问题）。
 export function describeUpdateError(raw: string): string {

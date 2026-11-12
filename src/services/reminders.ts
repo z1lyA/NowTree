@@ -9,12 +9,9 @@ import type { Transaction } from "../types/transaction";
 import type { ReminderCard } from "./reminderCards";
 import { localDateKey } from "../utils/weeklyReview";
 import { getReminderPrefs, reminderLayoutOf, type ReminderPrefs } from "../utils/reminderPrefs";
+import { isTauri } from "../utils/isTauri";
 
 const SNOOZE_MINUTES = 5;
-
-function isTauriEnv(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 // 把一批卡片交给 Rust：没有窗口则创建，已存在则追加/替换后重新显示。
 // 返回 true 表示已投递；false 表示「弹窗通知被关闭」或非 Tauri 环境（调用方据此决定是否写去重标记）。
@@ -27,7 +24,7 @@ export async function pushReminderCards(
   if (cards.length === 0) return false;
   const prefs = prefsOverride ?? getReminderPrefs();
   if (!prefs.enabled) return false;
-  if (!isTauriEnv()) return false;
+  if (!isTauri()) return false;
   await invoke("show_reminder_cards", { cards, layout: reminderLayoutOf(prefs) });
   return true;
 }

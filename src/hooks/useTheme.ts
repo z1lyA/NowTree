@@ -9,7 +9,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-export type ThemeMode = "light" | "dark" | "system";
+// 系统深浅色。单独给个类型名是因为它有两个来源（Rust 返回值与 localStorage 缓存），
+// 两者都要过同一道校验；散写 "light" | "dark" 时难免有一处漏判。
+export type SystemTheme = "light" | "dark";
+export type ThemeMode = SystemTheme | "system";
 
 const THEME_KEY = "nowtree.theme";
 // 上一次读到的系统深浅色。只服务于「启动首帧」：让 system 模式不必等异步 IPC 就能上色，
@@ -20,7 +23,12 @@ const SYS_KEY = "nowtree.systemTheme";
 // 注册表又没有可订阅的变更事件，只能轮询——一次注册表读取，开销可忽略。
 const SYSTEM_POLL_MS = 20_000;
 
-function mediaTheme(): "light" | "dark" {
+// 把任意字符串（缓存值 / Rust 返回值）收成 SystemTheme，不合法返回 null。
+function asSystemTheme(v: string | null): SystemTheme | null {
+  return v === "dark" || v === "light" ? v : null;
+}
+
+function mediaTheme(): SystemTheme {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
@@ -28,22 +36,20 @@ function storedMode(): ThemeMode {
   return (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
 }
 
-function cachedSystemTheme(): "light" | "dark" | null {
-  const v = localStorage.getItem(SYS_KEY);
-  return v === "dark" || v === "light" ? v : null;
+function cachedSystemTheme(): SystemTheme | null {
+  return asSystemTheme(localStorage.getItem(SYS_KEY));
 }
 
 // 唯一真正碰 DOM 的地方：主题只由 data-theme 驱动（CSS 里没有任何 prefers-color-scheme 媒体查询）。
-function paint(mode: ThemeMode, systemTheme: "light" | "dark") {
+function paint(mode: ThemeMode, systemTheme: SystemTheme) {
   document.documentElement.dataset.theme = mode === "system" ? systemTheme : mode;
 }
 
 /** 读系统深浅色：优先问 Rust（注册表）；浏览器预览 / 命令失败时退回媒体查询。 */
-export async function resolveSystemTheme(): Promise<"light" | "dark"> {
-  let theme: "light" | "dark" | null = null;
+export async function resolveSystemTheme(): Promise<SystemTheme> {
+  let theme: SystemTheme | null = null;
   try {
-    const t = await invoke<string>("get_system_theme");
-    if (t === "dark" || t === "light") theme = t;
+    theme = asSystemTheme(await invoke<string>("get_system_theme"));
   } catch {
     // 浏览器预览没有 IPC，或是旧后端：交给下面的兜底
   }
@@ -54,14 +60,19 @@ export async function resolveSystemTheme(): Promise<"light" | "dark"> {
 
 /**
  * 按「本地偏好 → 缓存/兜底系统色」同步上色。
- * 主窗口与提醒窗口的入口都在 render() 之前调用它，保证首帧颜色就是对的。
+ *
+ * 为什么必须在 render() 之前调用：styles/index.css 里 :root 的主题变量默认就是深色，
+ * 浅色靠 :root[data-theme="light"] 覆盖；而 useTheme 原本要到 useEffect 里才写 data-theme，
+ * 那时首帧已经画完——于是系统设为浅色的用户每次启动都会先闪一下深色再变白。
+ * 主窗口与提醒窗口的入口（main.tsx / reminder/main.tsx）都在 render() 前各调一次。
+ * 它是幂等的：useTheme 挂载后还会再应用一次，结果相同。
  */
 export function applyStoredTheme() {
   paint(storedMode(), cachedSystemTheme() ?? mediaTheme());
 }
 
 /** 读真实系统色并套用，返回读到的值。用于启动后的纠正与轮询复查。 */
-export async function refreshSystemTheme(): Promise<"light" | "dark"> {
+export async function refreshSystemTheme(): Promise<SystemTheme> {
   const sys = await resolveSystemTheme();
   paint(storedMode(), sys);
   return sys;
@@ -69,7 +80,7 @@ export async function refreshSystemTheme(): Promise<"light" | "dark"> {
 
 export function useTheme() {
   const [theme, setTheme] = useState<ThemeMode>(storedMode);
-  const [systemTheme, setSystemTheme] = useState<"light" | "dark">(
+  const [systemTheme, setSystemTheme] = useState<SystemTheme>(
     () => cachedSystemTheme() ?? mediaTheme(),
   );
 

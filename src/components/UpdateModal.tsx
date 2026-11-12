@@ -2,25 +2,26 @@
 // 只做三件事：说清「旧版本 → 新版本」、可选「下载并安装」（带进度）、随时能退到「打开发布页」。
 // 安装走 tauri-plugin-updater：下载完会校验签名，再交给 Windows 安装器；
 // 安装器默认 restartAfterInstall=true，会先退出本应用、装完自动重启，所以这里不需要 relaunch()。
+// 1.1.8：下载 / 安装的插件调用挪到 services/updateCheck.ts#installUpdate——本组件只留「怎么显示」，
+// 插件的事件形状（Started / Progress / Finished）不再泄漏到这一层。
 import { useState } from "react";
-import type { Update } from "@tauri-apps/plugin-updater";
 import Modal from "./common/Modal";
-import type { UpdateInfo } from "../services/updateCheck";
-import { openReleasesPage } from "../services/updateCheck";
-import { clampNotes, describeUpdateError, formatReleaseDate } from "../utils/updateText";
+import type { AvailableUpdate } from "../services/updateCheck";
+import { installUpdate, openReleasesPage } from "../services/updateCheck";
+import { clampNotes, errorText, formatReleaseDate } from "../utils/updateText";
 
 type Phase = "idle" | "downloading" | "installing" | "failed";
 
 interface UpdateModalProps {
-  update: Update;
-  info: UpdateInfo;
+  available: AvailableUpdate;
   onClose: () => void;
 }
 
-export default function UpdateModal({ update, info, onClose }: UpdateModalProps) {
+export default function UpdateModal({ available, onClose }: UpdateModalProps) {
+  const { update, info } = available;
   const [phase, setPhase] = useState<Phase>("idle");
-  // 下载进度只在 Started / Progress 两个事件里更新，用一份 state 存两段字节数，
-  // 百分比由它派生——避免「字节数」和「百分比」两份状态互相追不上。
+  // 下载进度用「已下载 / 总字节」两份数字存，百分比由它派生——
+  // 避免「字节数」和「百分比」两份状态互相追不上。
   const [progress, setProgress] = useState({ got: 0, total: 0 });
   const [err, setErr] = useState("");
 
@@ -42,28 +43,17 @@ export default function UpdateModal({ update, info, onClose }: UpdateModalProps)
     setPhase("downloading");
     setProgress({ got: 0, total: 0 });
     setErr("");
-
-    // 回调是高频的，字节数先攒在局部变量里，再一次性写进 state。
-    let got = 0;
-    let total = 0;
     try {
-      await update.downloadAndInstall((event) => {
-        if (event.event === "Started") {
-          total = event.data.contentLength ?? 0;
-          setProgress({ got: 0, total });
-        } else if (event.event === "Progress") {
-          got += event.data.chunkLength;
-          setProgress({ got, total });
-        } else {
-          setPhase("installing"); // Finished：下载结束，接下来交给安装器
-        }
+      await installUpdate(update, {
+        onProgress: (got, total) => setProgress({ got, total }),
+        onInstalling: () => setPhase("installing"),
       });
       // Windows 下应用会在安装器启动时被退出，正常走不到这里；
       // 真走到了说明安装器已跑起来，保持「正在安装」，别让用户以为卡住。
       setPhase("installing");
     } catch (e) {
       setPhase("failed");
-      setErr(describeUpdateError(e instanceof Error ? e.message : String(e)));
+      setErr(errorText(e)); // installUpdate 抛出的已经是中文文案，不再二次翻译
     }
   }
 
