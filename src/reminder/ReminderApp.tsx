@@ -1,4 +1,7 @@
-// 1.1.5：右下角提醒窗口的 React 实现。
+// 右下角提醒窗口的 React 实现。
+//
+// 1.1.9 起是「一卡一窗口」：每个提醒窗口（标签 reminder-N）只渲染一张卡，
+// 多张卡由 Rust 分配槽位、各自开窗并纵向排列，窗口之间不共享 React 状态。
 //
 // 三种卡片共用一套外壳（kind 决定头部强调色）：
 //   - task   事务提醒：完成 / 稍后（时长可配置）/ 关闭（一次只对应一条事务）
@@ -7,14 +10,14 @@
 //   - preview 设置里的实验卡：只有关闭，用来预览样式
 //
 // 交互：
-//   - 多卡时默认折叠成「最新 1 张 + N 条提醒」堆叠（背后画出 N-1 层卡片边缘，最多 3 层），
-//     可展开 / 全部关闭；数字与堆叠层数随「完成 / 稍后 / 关闭」实时变化；
-//   - 10 秒自动收起（鼠标悬停暂停），收起即清空本次卡片；
-//   - 卡片空白处按住可拖动整个窗口；拖动只在本次显示有效，新提醒仍回到设置的位置。
+//   - 10 秒无操作自动收起（鼠标悬停暂停），收起即关闭本窗口的卡片；
+//   - 卡片空白处按住可拖动本窗口；拖动只在本次显示有效，新提醒仍回到设置的位置。
 //
-// 与主窗口的协作：
-//   - 主窗口先 invoke("show_reminder_cards") 投递卡片（附带四角 / 宽度布局）；
-//   - 本窗口挂载时 invoke("take_reminder_cards") 取走建窗前暂存的卡片，之后靠事件追加；
+// 与 Rust / 主窗口的协作：
+//   - 主窗口先 invoke("show_reminder_cards") 投递卡片（附带四角 / 宽度布局），Rust 分槽开窗；
+//   - 本窗口挂载时 invoke("take_reminder_card") 取走建窗前暂存的那张卡，之后靠事件更新；
+//   - 内容高度变化 → invoke("fit_reminder_card")，Rust 重排所有窗口（纵向不重叠）；
+//   - 关闭 / 完成 / 稍后 → invoke("close_reminder_card")，Rust 隐藏本窗口并重排；
 //   - 完成 / 稍后 会写库并广播 nowtree:data-changed，主窗口收到后刷新列表；
 //   - 「去整理」广播 nowtree:open-view → 主窗口切到 Inbox。
 import { useEffect, useRef, useState } from "react";
@@ -22,7 +25,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ReminderCard } from "../services/reminderCards";
-import { mergeCards, removeCard } from "../services/reminderCards";
 import { snoozeTargetValue } from "../services/reminders";
 import { getReminderPrefs } from "../utils/reminderPrefs";
 import { useTheme, refreshSystemTheme } from "../hooks/useTheme";
@@ -43,19 +45,14 @@ const SLOT_PERIOD_WORD: Record<string, string> = {
 
 // 无操作多久自动收起（鼠标悬停暂停）。
 const AUTO_HIDE_MS = 10_000;
-// 折叠时最多画几层「背后卡片」的边缘
-const MAX_STACK_LAYERS = 3;
-const STACK_LAYER_OFFSET = 12;
-const STACK_LAYER_INSET = 22;
 
-// 模块级缓存：挂载时只向 Rust 取一次待投递卡片。
-// 取完缓存下来，HMR / 重挂载重复合并也只会因 key 去重而安全。
+// 模块级缓存：本窗口挂载时只向 Rust 取一次待投递卡片（每个窗口各自一个 JS 上下文）。
 let pendingLoaded = false;
-let pendingCache: ReminderCard[] = [];
-async function loadPendingCards(): Promise<ReminderCard[]> {
+let pendingCache: ReminderCard | null = null;
+async function loadPendingCard(): Promise<ReminderCard | null> {
   if (!pendingLoaded) {
     pendingLoaded = true;
-    pendingCache = await invoke<ReminderCard[]>("take_reminder_cards");
+    pendingCache = await invoke<ReminderCard | null>("take_reminder_card");
   }
   return pendingCache;
 }
@@ -67,17 +64,22 @@ function errText(e: unknown): string {
 }
 
 export default function ReminderApp() {
-  useTheme(); // 跟随主窗口的深/浅色主题（同一 localStorage）
-  const [cards, setCards] = useState<ReminderCard[]>([]);
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [expanded, setExpanded] = useState(false);
+  useTheme(); // 跟随主窗口的深/浅色主题（同一份存储）
+  // 本窗口只持有一张卡；null 表示当前没有卡（窗口随后会被 Rust 隐藏）
+  const [card, setCard] = useState<ReminderCard | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
-  // 首次挂载是否已完成「取走暂存卡片」。在此之前 cards 为空只是还没取到，不能当成「没卡了」去隐藏窗口。
-  const [bootReady, setBootReady] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastHeightRef = useRef(0);
   const prefs = getReminderPrefs();
+
+  // 关闭本窗口的卡片：先本地清空（立即消失），再让 Rust 隐藏窗口并重排其余窗口。
+  function closeCard() {
+    setCard(null);
+    setError("");
+    void invoke("close_reminder_card").catch(() => {});
+  }
 
   // 窗口被隐藏再显示时（visibilitychange → visible）重新套用主题：
   // 提醒窗口是常驻复用的，主窗口期间改过主题它不会自动重渲染。
@@ -91,25 +93,26 @@ export default function ReminderApp() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  // ===== 订阅新卡片 + 取走暂存卡片 =====
+  // ===== 取走本窗口暂存的卡片 + 订阅后续更新 =====
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     (async () => {
       try {
-        unlisten = await listen<ReminderCard[]>("nowtree:reminder-push", (e) => {
+        // ⚠️ 必须显式指定 target 为「当前窗口」。
+        // 前端 listen() 不传 options 时默认注册成 EventTarget::Any（见 @tauri-apps/api/event.js），
+        // 而 Tauri 的事件投递会拿「监听器自己的 target」去匹配——Any 对任何 emit_to 都成立，
+        // 于是每个提醒窗口都会收到发给其它窗口的卡片，最后一张覆盖全部的卡（三张一样的弹窗）。
+        const label = getCurrentWindow().label;
+        unlisten = await listen<ReminderCard>("nowtree:reminder-push", (e) => {
           if (disposed) return;
-          setCards((c) => mergeCards(c, e.payload));
-        });
-        const pending = await loadPendingCards();
-        if (!disposed && pending.length > 0) {
-          setCards((c) => mergeCards(c, pending));
-        }
+          setCard(e.payload);
+          setError("");
+        }, { target: { kind: "WebviewWindow", label } });
+        const pending = await loadPendingCard();
+        if (!disposed && pending) setCard(pending);
       } catch {
         /* 非 Tauri 环境（浏览器预览）没有事件/命令，忽略 */
-      } finally {
-        // 取件成功/失败都标记「首屏就绪」，之后 cards 为空才是真的没卡了。
-        if (!disposed) setBootReady(true);
       }
     })();
     return () => {
@@ -118,45 +121,30 @@ export default function ReminderApp() {
     };
   }, []);
 
-  // ===== 卡片清空 → 隐藏窗口（保留窗口复用） =====
-  // 必须等首屏取件完成后才判断：建窗时窗口已显示，挂载瞬间 cards 恒为空，
-  // 若这时就 hide，会把刚取到的第一批卡片连同窗口一起藏掉。
-  // 再延迟 200ms：避免「事件正在路上、先渲染成空列表」时把窗口误藏。
+  // ===== 10 秒自动收起（悬停暂停） =====
+  // 每个窗口各自计时：先到的卡片先收，符合「独立弹窗」的预期。
   useEffect(() => {
-    if (!bootReady || cards.length > 0) return;
-    const timer = window.setTimeout(() => {
-      void invoke("hide_reminder_window").catch(() => {});
-    }, 200);
+    if (!card || paused) return;
+    const timer = window.setTimeout(() => closeCard(), AUTO_HIDE_MS);
     return () => window.clearTimeout(timer);
-  }, [bootReady, cards.length]);
+  }, [card, paused]);
 
-  // ===== 10 秒自动收起（悬停 / 展开阅读时暂停） =====
-  // 收起 = 清空本次卡片并隐藏窗口：新提醒到来会重新弹出并重新计时。
+  // ===== 内容高度变化 → 让 Rust 重排所有提醒窗口 =====
+  // 只更新尺寸 / 位置，不会把已关闭的窗口重新显示出来。
+  // 依赖 card：没有卡片时组件渲染 null（没有 .reminder-root 可测），
+  // 必须等卡片到达、DOM 出现后重新建立观察者，否则窗口会停在占位高度。
   useEffect(() => {
-    if (cards.length === 0 || paused) return;
-    const timer = window.setTimeout(() => {
-      setCards([]);
-      setErrors({});
-      setExpanded(false);
-    }, AUTO_HIDE_MS);
-    return () => window.clearTimeout(timer);
-  }, [cards.length, paused, expanded]);
-
-  // 只剩一张（或清空）时不再需要展开态
-  useEffect(() => {
-    if (cards.length <= 1) setExpanded(false);
-  }, [cards.length]);
-
-  // ===== 内容高度变化 → 让 Rust 调整窗口高度并保持所选角落 =====
-  useEffect(() => {
+    if (!card) return;
     const el = rootRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
+    // 换了卡片要重新上报，避免新卡高度恰好等于旧值而被判为「没变化」跳过
+    lastHeightRef.current = 0;
     let timer = 0;
     const measureAndFit = () => {
       const height = Math.ceil(el.getBoundingClientRect().height);
       if (Math.abs(height - lastHeightRef.current) < 1) return;
       lastHeightRef.current = height;
-      void invoke("fit_reminder_window", { height }).catch(() => {});
+      void invoke("fit_reminder_card", { height }).catch(() => {});
     };
     const ro = new ResizeObserver(() => {
       window.clearTimeout(timer);
@@ -168,24 +156,9 @@ export default function ReminderApp() {
       ro.disconnect();
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [card]);
 
-  function dismiss(key: string) {
-    setCards((c) => removeCard(c, key));
-    setErrors((e) => {
-      const next = { ...e };
-      delete next[key];
-      return next;
-    });
-  }
-
-  function closeAll() {
-    setCards([]);
-    setErrors({});
-    setExpanded(false);
-  }
-
-  // 卡片空白处按住 = 拖动窗口（方案 B：拖动只在本次显示有效，不记忆位置）。
+  // 卡片空白处按住 = 拖动本窗口（拖动只在本次显示有效，不记忆位置）。
   // 新提醒投递时 Rust 会按「设置 → 弹窗个性化」里的四角位置重新贴边。
   function handlePointerDown(e: React.PointerEvent) {
     if (e.button !== 0) return;
@@ -198,28 +171,24 @@ export default function ReminderApp() {
     }
   }
 
-  async function runCardAction(key: string, fn: () => Promise<void>) {
-    setBusy((b) => ({ ...b, [key]: true }));
-    setErrors((e) => ({ ...e, [key]: "" }));
+  async function runCardAction(fn: () => Promise<void>) {
+    setBusy(true);
+    setError("");
     try {
       await fn();
     } catch (e) {
-      setErrors((prev) => ({ ...prev, [key]: errText(e) }));
+      setError(errText(e));
     } finally {
-      setBusy((b) => {
-        const next = { ...b };
-        delete next[key];
-        return next;
-      });
+      setBusy(false);
     }
   }
 
-  // 完成：写库（completed + 清提醒）→ 广播数据变更 → 移除卡片（剩余数量 / 堆叠自动更新）
-  function completeTask(card: ReminderCard) {
-    if (card.id == null) return;
-    void runCardAction(card.key, async () => {
+  // 完成：写库（completed + 清提醒）→ 广播数据变更 → 关闭本窗口
+  function completeTask(c: ReminderCard) {
+    if (c.id == null) return;
+    void runCardAction(async () => {
       await invoke("update_transaction", {
-        id: card.id,
+        id: c.id,
         patch: {
           status: "completed",
           completed_time: new Date().toISOString(),
@@ -227,49 +196,46 @@ export default function ReminderApp() {
           clear_reminder: true,
         },
       });
-      dismiss(card.key);
+      closeCard();
       await emit("nowtree:data-changed");
     });
   }
 
   // 稍后：按设置里的时长（默认 5 分钟，可 5/15/30）再提醒
-  function snoozeTask(card: ReminderCard) {
-    if (card.id == null) return;
-    void runCardAction(card.key, async () => {
+  function snoozeTask(c: ReminderCard) {
+    if (c.id == null) return;
+    void runCardAction(async () => {
       await invoke("update_transaction", {
-        id: card.id,
+        id: c.id,
         patch: {
           reminder_time: snoozeTargetValue(new Date(), getReminderPrefs().snoozeMinutes),
           reminder_done: 0,
         },
       });
-      dismiss(card.key);
+      closeCard();
       await emit("nowtree:data-changed");
     });
   }
 
   // 每周回顾「去整理」：切到主窗口 Inbox
-  function openInbox(card: ReminderCard) {
-    void runCardAction(card.key, async () => {
+  function openInbox() {
+    void runCardAction(async () => {
       await emit("nowtree:open-view", "inbox");
       await invoke("show_main_window");
-      dismiss(card.key);
+      closeCard();
     });
   }
 
   // 每日摘要「开始今天」：打开主窗口
-  function startToday(card: ReminderCard) {
-    void runCardAction(card.key, async () => {
+  function startToday() {
+    void runCardAction(async () => {
       await invoke("show_main_window");
-      dismiss(card.key);
+      closeCard();
     });
   }
 
-  // 多卡时默认只显示最新一张，并在背后画出「还有几张」的堆叠边缘；展开后全部列出。
-  const ordered = [...cards].reverse(); // 新的在前
-  const collapsed = cards.length > 1 && !expanded;
-  const layerCount = collapsed ? Math.min(cards.length - 1, MAX_STACK_LAYERS) : 0;
-  const visibleCards = collapsed ? ordered.slice(0, 1) : ordered;
+  // 没有卡片时不渲染内容（窗口由 Rust 隐藏，这里只是避免闪空壳）。
+  if (!card) return null;
 
   return (
     <div
@@ -279,146 +245,97 @@ export default function ReminderApp() {
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {cards.length > 1 && (
-        <div className="rcard-stackbar">
-          <span className="rcard-stackbar-count">{cards.length} 条提醒</span>
+      <article className={`rcard rcard--${card.kind}`}>
+        <div className="rcard-head">
+          <div className="rcard-headtext">
+            {card.kind !== "daily" && (
+              <span className="rcard-kind">{KIND_LABELS[card.kind] ?? "提醒"}</span>
+            )}
+            <h3 className="rcard-title">{card.title}</h3>
+          </div>
           <button
             type="button"
-            className="rcard-stackbar-btn"
-            onClick={() => setExpanded((v) => !v)}
+            className="rcard-close"
+            onClick={closeCard}
+            aria-label="关闭"
+            title="关闭"
           >
-            {expanded ? "收起" : "展开"}
-          </button>
-          <button
-            type="button"
-            className="rcard-stackbar-btn rcard-stackbar-danger"
-            onClick={closeAll}
-          >
-            全部关闭
+            ×
           </button>
         </div>
-      )}
 
-      {visibleCards.map((card) => (
-        <div
-          key={card.key}
-          className="rcard-stackwrap"
-          style={{ paddingTop: layerCount * STACK_LAYER_OFFSET }}
-        >
-          {layerCount > 0 && (
-            <div className="rcard-layers" aria-hidden="true">
-              {Array.from({ length: layerCount }).map((_, i) => (
-                <span
-                  key={i}
-                  className="rcard-layer"
-                  style={{
-                    top: (layerCount - 1 - i) * STACK_LAYER_OFFSET,
-                    width: `calc(100% - ${(i + 1) * STACK_LAYER_INSET}px)`,
-                    opacity: Math.max(0.4, 0.95 - i * 0.2),
-                    zIndex: layerCount - i,
-                  }}
-                />
-              ))}
-            </div>
+        <div className="rcard-body">
+          {(card.kind === "task" || card.kind === "review") && card.note && (
+            <p className="rcard-note">{card.note}</p>
           )}
 
-          <article className={`rcard rcard--${card.kind}`}>
-            <div className="rcard-head">
-              <div className="rcard-headtext">
-                {card.kind !== "daily" && (
-                  <span className="rcard-kind">{KIND_LABELS[card.kind] ?? "提醒"}</span>
-                )}
-                <h3 className="rcard-title">{card.title}</h3>
-              </div>
+          {card.kind === "daily" && <DailyBody card={card} />}
+
+          {error && <p className="rcard-error">{error}</p>}
+
+          <div className="rcard-actions">
+            {card.preview && (
+              <button type="button" className="btn-ghost" onClick={closeCard}>
+                关闭
+              </button>
+            )}
+
+            {!card.preview && card.kind === "task" && (
+              <>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={busy}
+                  onClick={() => snoozeTask(card)}
+                  title={`${prefs.snoozeMinutes} 分钟后再提醒`}
+                >
+                  稍后
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => completeTask(card)}
+                >
+                  完成
+                </button>
+              </>
+            )}
+
+            {!card.preview && card.kind === "review" && (
+              <>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={busy}
+                  onClick={closeCard}
+                >
+                  知道了
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => openInbox()}
+                >
+                  去整理
+                </button>
+              </>
+            )}
+
+            {!card.preview && card.kind === "daily" && (
               <button
                 type="button"
-                className="rcard-close"
-                onClick={() => dismiss(card.key)}
-                aria-label="关闭"
-                title="关闭"
+                className="btn-primary"
+                disabled={busy}
+                onClick={() => startToday()}
               >
-                ×
+                {card.slot === "rest" ? "知道了" : "开始今天"}
               </button>
-            </div>
-
-            <div className="rcard-body">
-              {(card.kind === "task" || card.kind === "review") && card.note && (
-                <p className="rcard-note">{card.note}</p>
-              )}
-
-              {card.kind === "daily" && <DailyBody card={card} />}
-
-              {errors[card.key] && <p className="rcard-error">{errors[card.key]}</p>}
-
-              <div className="rcard-actions">
-                {card.preview && (
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    onClick={() => dismiss(card.key)}
-                  >
-                    关闭
-                  </button>
-                )}
-
-                {!card.preview && card.kind === "task" && (
-                  <>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      disabled={!!busy[card.key]}
-                      onClick={() => snoozeTask(card)}
-                      title={`${prefs.snoozeMinutes} 分钟后再提醒`}
-                    >
-                      稍后
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      disabled={!!busy[card.key]}
-                      onClick={() => completeTask(card)}
-                    >
-                      完成
-                    </button>
-                  </>
-                )}
-
-                {!card.preview && card.kind === "review" && (
-                  <>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      disabled={!!busy[card.key]}
-                      onClick={() => dismiss(card.key)}
-                    >
-                      知道了
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      disabled={!!busy[card.key]}
-                      onClick={() => openInbox(card)}
-                    >
-                      去整理
-                    </button>
-                  </>
-                )}
-
-                {!card.preview && card.kind === "daily" && (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={!!busy[card.key]}
-                    onClick={() => startToday(card)}
-                  >
-                    {card.slot === "rest" ? "知道了" : "开始今天"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </article>
+            )}
+          </div>
         </div>
-      ))}
+      </article>
     </div>
   );
 }

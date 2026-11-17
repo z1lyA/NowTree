@@ -124,17 +124,20 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 
 ### 提醒与每日摘要（1.1.5 重构）
 
-1.1.5 起不再调用 Windows 系统通知，改为 **应用自绘的右下角弹窗窗口**（label = `reminder`，页面 `reminder.html`）：
+1.1.5 起不再调用 Windows 系统通知，改为 **应用自绘的右下角弹窗窗口**（页面 `reminder.html`）；1.1.9 起改为 **一卡一窗口**（标签 `reminder-0/1/2…`，槽位池化、常驻复用）：
 
 ```
 主窗口 React ──invoke("show_reminder_cards", cards, layout)──▶ Rust reminder.rs
-                                                         │ 首次：建窗（无边框 / 透明 / 不占任务栏）
-                                                         │ 每次：按 layout 贴到所选角落 / 应用宽度
-                                                         │ 之后：emit_to("reminder", "nowtree:reminder-push", cards)
+                                                         │ 分槽：同 key 复用原槽，否则取空闲槽（最多 6 个）
+                                                         │ 建窗：无边框 / 不占任务栏 / 隐藏复用
+                                                         │      1.1.9 起整窗铺底 + DWM 系统圆角，不依赖逐像素透明
+                                                         │ 排布：relayout() 按各槽高度自上而下纵向排列、贴所选角落
+                                                         │ 推送：emit_to("reminder-N", "nowtree:reminder-push", card)
                                                          ▼
-                                       reminder 窗口 React（src/reminder/）
-                                         挂载时 take_reminder_cards() 取走建窗前暂存的卡片
-                                         内容变化 → fit_reminder_window() 自适应高度
+                                       各自独立的 reminder 窗口 React（src/reminder/）
+                                         挂载时 take_reminder_card() 取走本槽建窗前暂存的卡片
+                                         内容变化 → fit_reminder_card() 上报高度并触发全局重排
+                                         关闭 / 完成 → close_reminder_card() 隐藏本窗口并重排其余
 ```
 
 - **三种卡片**（`src/services/reminderCards.ts` 的 `ReminderCard.kind`）：
@@ -146,8 +149,11 @@ NowTree 是一个 **Tauri v2 桌面应用**：Rust 负责系统能力与本地�
 - **每日摘要**：`useDailyDigest` 在 `loadActive` 完成后按 `currentClockSlot()`（分界点来自「设置 → 时段分界线」）每 30 秒检查，用 `nowtree_daily_digest_last = <本地日期>:<slot>` 去重（同一时段每天一次）；**标记在卡片投递成功后才写**（失败下一轮重试）。原 `StartupModal` 已删除，卡片即入口；`rest` 时段发「晚安」卡。1.1.5 首次启动会一次性清理早期构建遗留的「已推送」标记（`utils/reminderMarks.ts`）。
 - **精确触发**：`useReminderScheduler` 按 `active` 里最早的 `reminder_time` 计算下一次触发时刻，同时 ① 设前端 `setTimeout` 兜底；② `invoke("schedule_reminder_fire", { atMs })` 交给 Rust 后台定时，到点 `emit("nowtree:reminder-due")` → 主窗口立即 `checkReminders`。30 秒 `useReminderScan` 保留为系统休眠 / 事件丢失的兜底；提醒时间变更时按代际号作废旧定时器。
 - **每周回顾**：`useWeeklyReview` 按 `nowtree_weekly_review`（默认启用、周日）判定，条件 = 星期匹配 + 当天未提醒 + Inbox 非空 + 09:00–22:00；**投递成功后才写** `nowtree_weekly_review_last`。
-- **窗口内交互（纯前端）**：10 秒无操作自动收起（鼠标悬停暂停，收起即清空本次卡片）；多卡默认折叠成「最新 1 张 + N 条提醒」，背后按剩余数量画有景深的堆叠层（逐层更窄 / 更暗 / 带投影，最多 3 层），可展开 / 全部关闭；卡片空白处 `startDragging()` 拖动整个窗口（需要 `core:window:allow-start-dragging`，拖拽不记忆位置）。
-- **事件契约**：`nowtree:reminder-push`（Rust → 提醒窗口，卡片数组）、`nowtree:data-changed`（提醒窗口 → 主窗口，刷新数据）、`nowtree:open-view`（提醒窗口 → 主窗口，切到 Inbox）。
+- **多窗口与排布（1.1.9 变更）**：每张卡占一个独立窗口，标签 `reminder-<槽位>`，槽位池上限 `MAX_SLOTS = 6`（超出的卡片进入 `overflow` 队列，有槽位空出自动补位）。`relayout()` 是唯一的排布入口：按各槽已上报高度自上而下纵向排列、间距 8px、整体贴所选角落（左下/右下时先算总高再定起点）。卡片关闭只隐藏窗口（隐藏复用），不销毁 webview。
+- **窗口内交互（纯前端）**：10 秒无操作自动收起（鼠标悬停暂停），收起即关闭本窗口的卡片；每个窗口各自计时。卡片空白处 `startDragging()` 拖动本窗口（需要 `core:window:allow-start-dragging`，拖拽不记忆位置）。1.1.9 起不再有窗口内的假堆叠 / 悬浮展开 / 计数条。
+- **窗口透明性（1.1.9 变更）**：本机 WebView2 下逐像素透明未被 DWM 接到桌面（alpha=0 被当成 `RGB(0,0,0)` 画出），原先卡片外 8px 透明留白恒为纯黑。`reminder.css` 让整窗铺 `--border`、不留未绘制像素；`reminder.rs` 在 `ensure_slot_window()` 建窗后用 `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)` 给**每个窗口**设 DWM 系统圆角（合成层绘制、GPU 抗锯齿）。曾试 GDI `CreateRoundRectRgn` + `SetWindowRgn` 裁物理圆角，但二值裁剪边缘有明显台阶锯齿，已弃用。卡片自身 `corner-shape: squircle`（连续曲率，旧 Runtime 回退普通圆弧）。`.transparent(true)` 刻意保留（避免 WebView2 默认白底闪白）；windows crate 为此加 `Win32_Graphics_Dwm` feature。系统圆角半径不可调，对无边框窗口是否生效需实机验收。
+- **事件契约**：`nowtree:reminder-push`（Rust → 单个提醒窗口，**单张卡片**）、`nowtree:data-changed`（提醒窗口 → 主窗口，刷新数据）、`nowtree:open-view`（提醒窗口 → 主窗口，切到 Inbox）。
+- **⚠️ 一卡一窗口下监听必须带 target**：前端 `listen(event, cb)` 不传 options 时默认注册成 `EventTarget::Any`，而 Tauri 投递 `emit_to(label)` 时是拿**监听器自己的 target** 去匹配（`*target == Any || filter(handler.target)`）——`Any` 对任何投递都成立，于是每个提醒窗口都会收到发给别的窗口的卡片，表现为「多张弹窗内容变成一样」。**凡是提醒窗口里监听"只该发给本窗口"的事件，必须 `listen(event, cb, { target: { kind: "WebviewWindow", label: getCurrentWindow().label } })`。** 广播类事件（`emit()`，如 `nowtree:data-changed`）保持默认即可。
 - **⚠️ 建窗命令必须是 async**：`show_reminder_cards` 声明为 `async`。Tauri 文档明确「Windows 下在同步命令 / 事件处理器里创建窗口会死锁」（WebView2 控制器不能在自身回调栈里重入创建）；同步写法会表现为整个应用冻住（界面停在加载中、点不动、关闭确认框也点不掉）。后续凡是新增「运行时建窗」的命令，都要遵循这一点。
 - **全屏不打扰**：投递时用 `SHQueryUserNotificationState` 判断前台是否全屏（F11 / 视频 / 演示模式）。全屏时卡片**先进入排队队列**（不建窗 / 不显示 / 不抢焦点）；后台监测线程每 2 秒检查一次，退出全屏后把暂存卡片统一弹出。非全屏时正常置顶显示。
 - **边界**：窗口最小化到托盘时进程仍存活、提醒照常（JS 定时器被系统节流时延迟最多约 1 分钟）；**彻底退出后不再提醒**（OS 级定时仍未做）。显示 / 隐藏走 Win32 `ShowWindow(SW_SHOWNOACTIVATE / SW_HIDE)`：tao 只在首次显示用不激活方式，之后再 `show()` 会走 `SW_SHOW` 可能抢焦点，故统一由 Rust 直接控制。
@@ -210,7 +216,7 @@ https://github.com/z1lyA/NowTree/releases/latest/download/latest.json
 
 ### 权限（capabilities）
 
-`src-tauri/capabilities/` 按窗口开放权限：`default.json` 给主窗口（`core:default`、`dialog`、`autostart`、`opener`、`updater`），`reminder.json` 给右下角提醒窗口（`core:default`，供事件监听 / 发送）。新增 Tauri 命令若前端报权限错，先来这里加对应 `allow-*`。1.1.5 起已移除 `notification` 插件与权限。
+`src-tauri/capabilities/` 按窗口开放权限：`default.json` 给主窗口（`core:default`、`dialog`、`autostart`、`opener`、`updater`），`reminder.json` 给右下角提醒窗口（`windows: ["reminder-*"]` 通配全部提醒窗口，`core:default` 供事件监听 / 发送，另加 `core:window:allow-start-dragging`）。**1.1.9 起窗口标签是动态的 `reminder-N`，capability 必须用通配，否则新窗口没有 IPC 权限会白屏。** 新增 Tauri 命令若前端报权限错，先来这里加对应 `allow-*`。1.1.5 起已移除 `notification` 插件与权限。
 
 > `updater:default` = `allow-check` / `allow-download` / `allow-install` / `allow-download-and-install` 四项，覆盖「检查 → 下载 → 安装」全流程；签名校验在 Rust 侧完成，不依赖前端。
 

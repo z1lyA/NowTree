@@ -1,6 +1,6 @@
 [package]
 name = "nowtree"
-version = "1.1.8"
+version = "1.1.9"
 description = "NowTree - 个人事务管理系统"
 edition = "2021"
 
@@ -29,7 +29,9 @@ uuid = { version = "1", features = ["v4"] } # 0.1.19：sync_id 生成
 [target.'cfg(windows)'.dependencies]
 # 1.1.7：Win32_System_Registry 供 get_system_theme 读 AppsUseLightTheme（WebView2 的
 # prefers-color-scheme 在 Tauri 里不可信，见 commands.rs 注释）。
-windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Registry"] }
+# 1.1.9：Win32_Graphics_Dwm 供提醒窗口 DwmSetWindowAttribute 设系统圆角——
+# DWM 合成层画圆角有抗锯齿，避免 GDI region 二值裁剪的台阶锯齿。
+windows = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Graphics_Dwm"] }
 
 [profile.release]
 panic = "abort"

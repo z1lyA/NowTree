@@ -4,6 +4,47 @@
 
 ---
 
+## 1.1.9（2026-11-16）
+
+本次是一次**提醒弹窗改版 + 视觉修复**：弹窗四周恒为纯黑的边、卡片圆角的黑角都修掉了，卡片圆角换成连续曲率的苹果风格 squircle，窗口圆角交给 DWM 系统圆角（抗锯齿）；同时把「一个窗口装多张卡」改造成 **一卡一窗口**、多窗口纵向排列。零数据库迁移，不动表结构。
+
+### 修复
+- **提醒弹窗四周的纯黑边**：卡片外原本留了 8px 透明内边距（1.1.5 起为阴影与滑入动画预留）。本机 WebView2 下，逐像素透明没有被 DWM 接到桌面——alpha=0 的像素被当成 `RGB(0,0,0)` 画出来，于是这圈留白恒为纯黑，换壁纸 / 换 Windows 桌面 / 换主题都不变。现在窗口整面铺 `--border`、内边距归零，**不留任何未绘制像素**，黑边从物理上消失；深浅主题自动跟随。
+- **卡片圆角的黑角 → DWM 系统圆角**：窗口是矩形、卡片是圆角，四角原本会露出窗口底色形成小黑角。先试过 GDI `CreateRoundRectRgn` + `SetWindowRgn` 裁物理圆角，但 region 是二值裁剪、圆角边缘呈台阶状锯齿（实机确认）；改用 `DWMWA_WINDOW_CORNER_PREFERENCE = ROUND`，让 DWM 在合成层画圆角，有 GPU 抗锯齿、边缘平滑。这是窗口属性，建窗时设一次即可。代价：圆角半径由系统决定、不可调，且对无边框窗口是否生效需验收确认。
+- **圆角改为连续曲率（squircle）**：卡片加 `corner-shape: squircle`（超椭圆 K=2，苹果风格），曲率一路平滑变化，不再是普通圆弧与直边交接处的曲率突变。`border-radius` 保留作尺寸来源与降级回退——不支持该属性的 WebView2 会忽略此行、退回普通圆弧，不会坏掉。
+- **去掉阴影与位移**：卡片 `box-shadow` 去掉（不透明窗口下阴影会被窗口边界裁掉，留着无意义）；入场动画去掉 `translateY(8px)` 只留淡入——位移的首帧会在卡片顶部露出一条底。
+- **关闭弹窗时一闪而过的灰色长条**：原先关掉卡片后要先缩到最小高度、贴回角落，隔一段时间才真正隐藏，中间窗口以一条矮条挂在那里（且无视拖拽位置）。现在关闭路径统一走 `close_reminder_card`：**先隐藏、再重排**，不再有"缩高→贴角落→隐藏"的中间态。
+
+### 改版：多卡改为「一卡一窗口」
+- **为什么**：原来的多卡是「一个窗口里塞多张卡 + CSS 画假堆叠边缘 + 悬浮展开 + 顶部计数条」。计数条本身没有背景，露出窗口底色形成灰色横条；假堆叠也只是视觉模拟。改成一卡一窗口后，每张卡是**真独立窗口**（可各自拖动、各自计时收起），窗口内那套假堆叠 / 悬浮展开 / 计数条全部删除。
+- **排布**：Rust 按各卡上报的实际高度，把所有窗口**自上而下纵向排列、互不重叠**（间距 8px），整体贴「设置 → 弹窗个性化」里选的角落；卡片增删或高度变化都触发全局重排（`relayout()`）。
+- **槽位池**：窗口标签 `reminder-0/1/2…`，最多 6 个；关闭只隐藏窗口（**隐藏复用**，不销毁 webview，下次直接显示）。超出上限的卡片进入排队，有槽位空出自动补位。
+- **10 秒自动收起**：每个窗口各自计时（悬停暂停），先到的卡片先收——符合「独立弹窗」的预期。
+- **修复「多张弹窗内容串成一样」的根因**：前端 `listen()` 不传 options 时，默认把监听目标注册成 `EventTarget::Any`（`@tauri-apps/api/event` 的实现），而 Tauri 投递 `emit_to(label)` 时是**拿监听器自己的 target 去匹配**（`*target == Any || filter(handler.target)`），`Any` 对任何投递都成立——于是每个提醒窗口都会收到本该发给别的窗口的卡片，后到的覆盖先到的，表现为「三个弹窗内容一模一样」。现在监听时显式带 `target: { kind: "WebviewWindow", label: 当前窗口 }`。**这也是为什么新建窗口（走 `take_reminder_card` 取件）时内容正确、复用窗口（走事件）时才串**。
+- **预览不再覆盖正式提醒**：每周回顾设置里的「预览」原先直接投递 `review:<日期>` 的正式卡，与正在显示的正式回顾提醒**同一个 key**；一卡一窗口后槽位按 key 认领，于是点预览会当场把那张正式卡换成预览内容。现在预览改用独立 key `preview:review`（`weeklyReviewPreviewCard()`，只带关闭按钮、不写库），个人化预览仍是 `preview:test`。
+- **新卡一律排在末尾**：原先按槽位序号排布，关闭中间某张后空出的槽会被后到的卡"填"上，看起来像先出现的卡被后来的顶替了。现在每个槽额外记录**到达序号**（`Slot::order`，单调递增发号），`relayout()` 按它排序——复用中间空槽时，新卡仍然排到最末。
+
+### 工程
+- 重写 `src-tauri/src/reminder.rs`：`ReminderState` 从单份 pending/ready 改为 **per-slot** 状态（`Vec<Slot>` + `overflow` 队列）；新增 `relayout()`（唯一排布入口，按各槽高度纵向排列）、`assign_cards()`（分槽 + 建窗 + 排布 + 推送，建窗刻意放在持锁之外避免与页面取件互锁）、`slot_label()` / `slot_index_of_label()`。`take_reminder_cards` / `fit_reminder_window` / `hide_reminder_window` 改为按调用窗口定位槽位的 `take_reminder_card` / `fit_reminder_card` / `close_reminder_card`（命令注入 `WebviewWindow` 参数）。
+- `src-tauri/src/lib.rs`：命令注册同步为三个新命令。
+- `src-tauri/capabilities/reminder.json`：`windows` 由 `["reminder"]` 改为 **`["reminder-*"]` 通配**——标签是动态的，不通配新窗口会没有 IPC 权限而白屏。
+- `src/reminder/ReminderApp.tsx`：改为单卡渲染（`card` 单值而非数组），删除 `mergeCards` / 多卡队列 / 堆叠层 / `expanded` / `closeAll`；新增 `closeCard()` 统一关闭路径；高度上报改 `fit_reminder_card`。高度测量 effect 依赖改为 `card`——没有卡片时组件渲染 `null`、`.reminder-root` 不存在，原先 `[]` 依赖会导致窗口永远停在占位高度、卡片被裁。`listen("nowtree:reminder-push")` 补上 `target: { kind: "WebviewWindow", label }`，避免收到其它窗口的卡片。
+- `src/services/reminders.ts`：新增 `weeklyReviewPreviewCard()`（独立 key `preview:review`）；`src/components/WeeklyReviewModal.tsx` 的「预览」改用它。
+- `src/styles/reminder.css`：删除 `.rcard-stackbar*`、`.rcard-stackwrap`、`.rcard-layers`、`.rcard-layer`（堆叠与计数条已无对应 DOM）；`.reminder-root` 去掉 `gap`。
+- `src-tauri/Cargo.toml`：windows crate 加 `Win32_Graphics_Dwm` feature（曾加的 `Win32_Graphics_Gdi` 因 region 锯齿已移除）。
+- `src-tauri/src/reminder.rs` 的 `.transparent(true)` **刻意保留**：改成 `false` 会让 WebView2 默认底色回到白色、可能闪一帧白；CSS 铺满后保留它无害。
+
+### 已知限制
+- **内存**：每个提醒窗口各有一个 WebView2 渲染实例，同时弹 3–5 张卡时内存占用高于原来的单窗口方案（槽位池上限 6）。
+- **首屏略慢**：批量来多张卡时要逐个建 webview，观感上是"一张张蹦出来"，不如单窗口一次性渲染平滑。
+- **无「全部关闭」入口**：只能逐张关闭，或等各自的 10 秒自动收起。
+- DWM 系统圆角半径由 Windows 决定、不可调，与卡片 squircle 曲率不一定重合；对无边框窗口是否生效、效果是否理想需用户实机验收。
+- `corner-shape` 是较新的 CSS 特性（Chrome 139+ 支持）：本机 WebView2 157 可用，但旧版 Runtime 会退回普通圆弧。
+- `reminderCards.ts` 的 `mergeCards` / `removeCard` 在多窗口方案下已不被窗口使用（仅保留给单测与潜在复用）。
+- 根因定位到「透明像素未被合成」，但具体断在 WebView2 Runtime 版本、DWM 还是本机合成环境，未做版本差分，不影响本修复。
+
+---
+
 ## 1.1.8（2026-11-12）
 
 本次为 **1.1.7 的补漏与收口**，没有新功能：把「检查更新」里几处承诺没兑现、口径对不上的地方补齐，顺手把三份重复的环境判断与插件调用收进 service。**零数据库迁移**，不动表结构。

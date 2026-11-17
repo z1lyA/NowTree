@@ -12,7 +12,7 @@ import {
   weekdayLabel,
   type WeeklyReviewSetting,
 } from "../utils/weeklyReview";
-import { pushReminderCards, weeklyReviewCard } from "../services/reminders";
+import { pushReminderCards, weeklyReviewPreviewCard } from "../services/reminders";
 import { showToast } from "../toast";
 
 interface WeeklyReviewModalProps {
@@ -46,7 +46,8 @@ export default function WeeklyReviewModal({
 
   function preview() {
     // 用真实 Inbox 数量弹一张卡，方便立刻确认卡片样式与内容。
-    void pushReminderCards([weeklyReviewCard(inboxCount)]);
+    // 用独立的 preview key：避免覆盖掉正在显示的正式每周回顾卡。
+    void pushReminderCards([weeklyReviewPreviewCard(inboxCount)]);
     showToast(
       inboxCount > 0
         ? `已弹出预览（Inbox ${inboxCount} 条）`

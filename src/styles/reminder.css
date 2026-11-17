@@ -1,20 +1,24 @@
-/* 1.1.5：右下角提醒窗口样式（仅 reminder.html 使用；主窗口不加载）。
- * 窗口本身 transparent + 无边框，因此 html/body 必须透明，只让卡片有底色。
- * 颜色全部走 index.css 的主题变量，跟随深/浅色主题。 */
+/* 右下角提醒窗口样式（仅 reminder.html 使用；主窗口不加载）。
+ * 1.1.9：一卡一窗口——每个窗口只渲染一张卡，多卡的纵向排列由 Rust 排布窗口负责。
+ * 窗口不再依赖逐像素透明——本机 WebView2 下 alpha=0 的像素没有被 DWM 接到桌面，
+ * 被当成 RGB(0,0,0) 画出来，于是卡片外那圈留白恒为纯黑。现在整窗铺满 --border，
+ * 不留未绘制像素；窗口圆角由 Rust 侧 DWMWA_WINDOW_CORNER_PREFERENCE 交给 DWM 在合成层画
+ * （有抗锯齿，避免 GDI region 的台阶锯齿）。--border 与卡片边框同色，边缘无缝衔接；
+ * 卡片自身仍有 squircle 圆角。颜色全部走 index.css 的主题变量，跟随深/浅色主题。 */
 
 html,
 body.reminder-body {
-  background: transparent !important;
+  background: var(--border) !important;
+  height: 100%;
   margin: 0;
   overflow: hidden;
 }
 
 .reminder-root {
-  /* 上下 8px 内边距：给卡片阴影与滑入动画留空间（Rust 侧按内容高校准窗口高度） */
-  padding: 8px;
+  /* 不留外边距：任何未绘制的像素在部分 WebView2 环境里都会变成纯黑边。 */
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   user-select: none;
   /* 1.1.5：悬停时是普通光标；按住卡片空白处才进入「抓取」并拖动窗口。 */
   cursor: default;
@@ -24,71 +28,10 @@ body.reminder-body {
   cursor: grabbing;
 }
 
-/* ===== 多卡折叠条：N 条提醒 / 展开收起 / 全部关闭 ===== */
-.rcard-stackbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 1px 4px 2px;
-}
-
-.rcard-stackbar-count {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.rcard-stackbar-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.rcard-stackbar-btn:hover {
-  background: var(--bg-input);
-  color: var(--text);
-}
-.rcard-stackbar-danger:hover {
-  color: var(--danger);
-}
-
 /* ===== 卡片（C 方案：强调色头部） ===== */
-.rcard-stackwrap {
-  position: relative;
-}
-
-/* 折叠时画在卡片背后的「景深」堆叠：每层更窄、更暗、带阴影，像一叠卡片往后收 */
-.rcard-layers {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  pointer-events: none;
-}
-.rcard-layer {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  height: 52px;
-  border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 14px 14px 0 0;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-elev) 94%, var(--bg)),
-    color-mix(in srgb, var(--bg-elev) 64%, var(--bg))
-  );
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 -4px 12px rgba(0, 0, 0, 0.32);
-}
-.rcard-stackwrap > .rcard {
-  position: relative;
-  z-index: 10;
-}
+/* 1.1.9：改为一卡一窗口后，窗口内只剩一张卡，原来的假堆叠层
+ * （.rcard-stackwrap / .rcard-layers / .rcard-layer）已删除。
+ * 多卡的纵向排列由 Rust 排布各窗口负责，不再用 CSS 画边缘。 */
 
 .rcard {
   --rcard-accent: var(--accent);
@@ -96,7 +39,11 @@ body.reminder-body {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  /* 连续曲率圆角（超椭圆 K=2，苹果风格）；不支持的 WebView2 会忽略此行、退回普通圆弧。
+   * border-radius 保留：既是形状尺寸来源，也是不支持时的降级回退。 */
+  corner-shape: squircle;
+  /* 1.1.9：去掉阴影与滑入位移——窗口不透明后阴影会被边界裁掉，
+   * translateY 的首帧还会在卡片顶部露出一条深灰底，改为纯淡入。 */
   animation: rcard-in 0.18s ease-out;
   overflow: hidden;
 }
@@ -110,11 +57,9 @@ body.reminder-body {
 @keyframes rcard-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 

@@ -65,6 +65,16 @@ export function reminderPreviewCard(): ReminderCard {
   };
 }
 
+// 每周回顾的「预览」卡：**必须和正式提醒用不同的 key**。
+// 一卡一窗口后槽位是按 key 认领的，若预览沿用 review:<日期>，
+// 点预览就会直接覆盖掉正在显示的那张正式回顾卡（看起来像"预览把正式弹窗同化了"）。
+export function weeklyReviewPreviewCard(
+  inboxCount: number,
+  now: Date = new Date(),
+): ReminderCard {
+  return { ...weeklyReviewCard(inboxCount, now), key: "preview:review", preview: true };
+}
+
 // Date → 本地 `datetime-local` 字符串（YYYY-MM-DDTHH:MM），与编辑弹窗的存储格式一致。
 export function localDateTimeValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");

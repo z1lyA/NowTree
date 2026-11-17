@@ -131,11 +131,12 @@ pub fn run() {
             // 1.1.5：关闭确认时把主窗口提到最前 / 解除临时置顶
             commands::bring_main_to_front,
             commands::release_main_topmost,
-            // 1.1.5：右下角自定义提醒弹窗（卡片投递 / 取件 / 自适应高度 / 隐藏 / 唤起主窗口）
+            // 1.1.5：右下角自定义提醒弹窗（卡片投递 / 取件 / 自适应高度 / 关闭 / 唤起主窗口）
+            // 1.1.9：改成一卡一窗口，取件 / 自适应高度 / 关闭都按调用窗口的槽位处理
             reminder::show_reminder_cards,
-            reminder::take_reminder_cards,
-            reminder::fit_reminder_window,
-            reminder::hide_reminder_window,
+            reminder::take_reminder_card,
+            reminder::fit_reminder_card,
+            reminder::close_reminder_card,
             reminder::show_main_window,
             reminder::schedule_reminder_fire,
         ])
